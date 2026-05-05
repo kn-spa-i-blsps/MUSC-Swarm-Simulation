@@ -12,6 +12,7 @@ public class DroneAI : MonoBehaviour
         public float integral = 0f;
         public float smoothedDerivative = 0f;
         public bool initialized = false;
+        
         public Queue<float> errorBuffer = new Queue<float>();
         public Queue<Vector3> directionBuffer = new Queue<Vector3>();
     }
@@ -45,14 +46,14 @@ public class DroneAI : MonoBehaviour
     void FixedUpdate()
     {
         DrawConnections();
-        if (isAnchor && connections.FindAll(c => c.target.isAnchor).Count == 0) return;
+        //if (isAnchor && connections.FindAll(c => c.target.isAnchor).Count == 0) return;
         if (connections.Count == 0) return;
 
         // --- 1. LOGIKA SENSORA (RADIO UWB) ---
         foreach (var c in connections)
         {
             if (c.target == null) continue;
-            if (c.target.isAnchor && isAnchor) continue;
+            if (!c.target.isAnchor && isAnchor) continue;
 
             // Prawdziwy wektor do sąsiada (to, co widzi świat, ale nie dron)
             Vector3 realVec = c.target.transform.position - transform.position;
@@ -74,7 +75,7 @@ public class DroneAI : MonoBehaviour
                 c.directionBuffer.Dequeue();
             }
         }
-
+        
         // --- 2. SUB-STEPPING PID (100% Blind Dead Reckoning) ---
         float subStepDeltaTime = Time.fixedDeltaTime / pidSubSteps;
         
