@@ -316,18 +316,36 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Simulation
   dronePrefab: {fileID: 4067856542222702386, guid: 92f833f1f7f551765bffa45105cd2dcc, type: 3}
-  trioCount: 5
+  trioCount: 3
   trioDistance: 2
-  updatePID: 1
-  globalP: 10
-  globalI: 1
-  globalD: 5
-  derivativeSmoothing: 0.2
-  globalSubSteps: 20
-  globalMoveSpeed: 1
-  globalDrag: 0.95
-  autoSpawnOn: 0
-  trioAutoSpawnSpacing: 10
+  connections:
+  - x: 1
+    y: 2
+    d: 5
+  - x: 1
+    y: 3
+    d: 5
+  - x: 3
+    y: 2
+    d: 5
+  spawnPositions:
+  - x: 0
+    z: 0
+  - x: 1
+    z: 1
+  - x: 0
+    z: 1
+  updateSettings: 0
+  globalDroneSettings:
+    verticalSpeed: 3
+    yawSpeed: 100
+    P: 50
+    I: 0.05
+    D: 5
+    derivativeSmoothing: 0.2
+    moveSpeed: 1
+    drag: 0.95
+    latencyFrames: 5
   enableWind: 1
   windStrength: 5
   windScale: 0.1

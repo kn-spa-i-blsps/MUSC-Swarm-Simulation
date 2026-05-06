@@ -3,12 +3,7 @@ using UnityEngine.InputSystem;
 
 public class DroneMover : MonoBehaviour
 {
-    public float moveSpeed = 5f;
-    public float verticalSpeed = 3f;
-    public float yawSpeed = 100f;
-
     public bool isActive = false;
-
     private DroneAI ai;
 
     void Start()
@@ -20,14 +15,11 @@ public class DroneMover : MonoBehaviour
     {
         if (isActive)
         {
-            // 🔹 WYŁĄCZ AI
             if (ai != null) ai.enabled = false;
-
             HandleInput();
         }
         else
         {
-            // 🔹 WŁĄCZ AI
             if (ai != null) ai.enabled = true;
         }
 
@@ -81,8 +73,8 @@ public class DroneMover : MonoBehaviour
             transform.right * strafe +
             transform.up * vertical;
 
-        transform.position += move * moveSpeed * Time.deltaTime;
-        transform.Rotate(Vector3.up, yaw * yawSpeed * Time.deltaTime, Space.Self);
+        transform.position += move * ai.droneSettings.moveSpeed * Time.deltaTime;
+        transform.Rotate(Vector3.up, yaw * ai.droneSettings.yawSpeed * Time.deltaTime, Space.Self);
     }
 
     void ResolveCollisions()
