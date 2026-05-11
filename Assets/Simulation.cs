@@ -1,3 +1,6 @@
+// [INFO]
+// W przeliczeniu na rozmiar drona (jesli mialby byc 3,5") - jeden REALNY metr to 6 jednostek w Unity
+
 using UnityEngine;
 using System.Collections.Generic;
 
@@ -37,9 +40,6 @@ public class Simulation : MonoBehaviour
     public float windTimeSpeed = 0.5f; 
     public float vibrationStrength = 0.2f; // Drgania silników
 
-    [Header("Latency Control")]
-    public float globalLatency = 5f;
-
     private CameraSwitcher cameraSwitcher;
 
     DroneTrioList trios;
@@ -53,8 +53,9 @@ public class Simulation : MonoBehaviour
         SetupCameras();
     }
 
-    void Update()
+    void FixedUpdate()
     {
+        DebugTrio(0);
         if(updateSettings)
         {
             updateSettings = false;
@@ -134,5 +135,16 @@ public class Simulation : MonoBehaviour
             cs.cameras.Add(t.a.GetComponentInChildren<Camera>());
             cs.drones.Add(t.a.GetComponent<DroneMover>());
         }
+    }
+
+    void DebugTrio(int n)
+    {
+        var drone = trios.dl[n].a;
+        Vector3 pos = drone.transform.position;
+        float timeMs = Time.fixedTime * 1000f;
+
+        // Formatowanie: czas w kolorze żółtym, pozycja z ograniczonymi miejscami po przecinku
+        Debug.Log($"[<color=yellow>{timeMs:F0} ms</color>] Drone <color=cyan>#{n}</color> | " +
+                $"Pos: (<b>{pos.x:F2}</b>, <b>{pos.y:F2}</b>, <b>{pos.z:F2}</b>)");
     }
 }

@@ -16,8 +16,11 @@ public class DroneSettings
     [Header("Physics")]
     public float moveSpeed = 1f;
     public float drag = 0.95f;
-    public int latencyFrames = 5;
 
     [Header("Physics")]
     public Mission mission;
+
+    [Header("Errors")]
+    public float driftSpeed;
+    public int globalLatency;
 }
