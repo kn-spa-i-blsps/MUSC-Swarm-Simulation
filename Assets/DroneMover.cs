@@ -73,8 +73,18 @@ public class DroneMover : MonoBehaviour
             transform.right * strafe +
             transform.up * vertical;
 
-        transform.position += move * ai.droneSettings.moveSpeed * Time.deltaTime;
-        transform.Rotate(Vector3.up, yaw * ai.droneSettings.yawSpeed * Time.deltaTime, Space.Self);
+        Vector3 horizontalMove = (transform.forward * forward + transform.right * strafe).normalized;
+        horizontalMove *= ai.droneSettings.horizontalSpeed;
+
+        // Ruch pionowy (Y)
+        Vector3 verticalMove = transform.up * vertical * ai.droneSettings.verticalSpeed;
+
+        // 3. Aplikacja ruchu i rotacji
+        // Sumujemy ruch, mnożymy przez deltę i dodajemy do pozycji
+        transform.position += (horizontalMove + verticalMove) * Time.fixedDeltaTime / 2;
+
+        // Rotacja
+        transform.Rotate(Vector3.up, yaw * ai.droneSettings.yawSpeed * Time.fixedDeltaTime, Space.Self);
     }
 
     void ResolveCollisions()

@@ -3,6 +3,7 @@
 
 using UnityEngine;
 using System.Collections.Generic;
+using Unity.VisualScripting;
 
 [System.Serializable]
 public struct ConnectionData
@@ -30,7 +31,13 @@ public class Simulation : MonoBehaviour
     public List<SpawnPoint> spawnPositions = new List<SpawnPoint>();
 
     [Header("Drone Settings")]
-    public bool updateSettings = false;
+    public int droneDebugNumber = 0;
+    public bool debugForces = false;
+    public bool debugPosition = false;
+    public int debugInterval = 100; // Co ile milisekund wyrzucić log do konsoli
+    private float lastDebugTime = 0f;
+    private DroneAI lastDebuggedDrone;
+    public bool updateDroneSettings = false;
     public DroneSettings globalDroneSettings = new DroneSettings();
 
     [Header("Advanced Wind & Noise")]
@@ -43,11 +50,20 @@ public class Simulation : MonoBehaviour
     private CameraSwitcher cameraSwitcher;
 
     DroneTrioList trios;
+    private List<DroneAI> allDrones = new List<DroneAI>(); // Płaska lista dla szybkiego dostępu
 
     void Start()
     {
         trios = new DroneTrioList(dronePrefab, trioDistance, connections, spawnPositions);
         trios.SyncDroneSettings(globalDroneSettings);
+
+        allDrones.Clear();
+        foreach (var trio in trios.dl)
+        {
+            allDrones.Add(trio.a);
+            allDrones.Add(trio.b);
+            allDrones.Add(trio.c);
+        }
 
         cameraSwitcher = GetComponent<CameraSwitcher>();
         SetupCameras();
@@ -55,11 +71,50 @@ public class Simulation : MonoBehaviour
 
     void FixedUpdate()
     {
-        DebugTrio(0);
-        if(updateSettings)
+        // Sprawdzamy czy czas na kolejną porcję debugu
+        if (Time.fixedTime >= lastDebugTime + debugInterval / 1000f)
         {
-            updateSettings = false;
+            HandleDronesDebug();
+            lastDebugTime = Time.fixedTime;
+        }
+
+        trios.SyncDroneSettings(globalDroneSettings);
+        /*if(updateDroneSettings)
+        {
             trios.SyncDroneSettings(globalDroneSettings);
+            updateDroneSettings = false;
+        }*/
+        // Tutaj opcjonalnie wywołaj SyncPhysicsSettings() jeśli go odkomentujesz
+    }
+
+    void HandleDronesDebug()
+    {
+        // 1. Sprawdzamy zakres
+        if (droneDebugNumber >= 0 && droneDebugNumber < allDrones.Count)
+        {
+            var currentDrone = allDrones[droneDebugNumber];
+
+            // 2. Jeśli zmienił się debugowany dron, wyłącz flagę u starego
+            if (lastDebuggedDrone != null && lastDebuggedDrone != currentDrone)
+            {
+                lastDebuggedDrone.debugEnabled = false;
+            }
+
+            if (currentDrone == null) return;
+
+            // 3. Aktywujemy debug u aktualnego drona
+            // Robimy to co interwał, ale flaga może być ustawiona na stałe
+            currentDrone.debugEnabled = (debugForces || debugPosition);
+            lastDebuggedDrone = currentDrone;
+
+            // 4. Wywołujemy logi w konsoli
+            if (debugForces) currentDrone.DebugForces(droneDebugNumber);
+            if (debugPosition) currentDrone.DebugPosition(droneDebugNumber);
+        }
+        else if (lastDebuggedDrone != null)
+        {
+            // Jeśli wyjdziemy poza zakres (np. wpiszesz -1), wyłącz debug u ostatniego
+            lastDebuggedDrone.debugEnabled = false;
         }
     }
 
