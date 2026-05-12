@@ -266,7 +266,6 @@ GameObject:
   m_Component:
   - component: {fileID: 1880230484}
   - component: {fileID: 1880230486}
-  - component: {fileID: 1880230487}
   - component: {fileID: 1880230485}
   m_Layer: 0
   m_Name: SImulationManager
@@ -337,8 +336,6 @@ MonoBehaviour:
       targets:
       - target: {x: 600, y: 0, z: 600}
         timeStamp: 12
-    uwbIntervalMs: 200
-    springK: 0.01
     driftSpeed: 0.01
     globalLatency: 0
   enableWind: 1
@@ -346,18 +343,6 @@ MonoBehaviour:
   windScale: 0.1
   windTimeSpeed: 0.5
   vibrationStrength: 0.2
---- !u!114 &1880230487
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1880230482}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 42584bc6dbf46a8b38431f902fedcf3d, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::UWBTransmission
 --- !u!1 &1974324491
 GameObject:
   m_ObjectHideFlags: 0

@@ -327,18 +327,16 @@ MonoBehaviour:
   globalDroneSettings:
     verticalSpeed: 3
     yawSpeed: 100
-    P: 50
-    I: 0.05
-    D: 5
-    derivativeSmoothing: 0.2
+    P: 0.05
+    I: 0
+    D: 0.01
+    derivativeSmoothing: 0.02
     moveSpeed: 1
     drag: 0.95
     mission:
-      targets:
-      - target: {x: 600, y: 0, z: 600}
-        timeStamp: 12
+      targets: []
     uwbIntervalMs: 200
-    springK: 0.01
+    springK: 0.1
     driftSpeed: 0.01
     globalLatency: 0
   enableWind: 1

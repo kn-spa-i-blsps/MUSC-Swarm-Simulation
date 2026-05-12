@@ -17,8 +17,12 @@ public class DroneSettings
     public float moveSpeed = 1f;
     public float drag = 0.95f;
 
-    [Header("Physics")]
+    [Header("Other")]
     public Mission mission;
+
+    [Header("UWB Transmission")]
+    public int uwbIntervalMs = 200;
+    public float springK = 0.01f;
 
     [Header("Errors")]
     public float driftSpeed;

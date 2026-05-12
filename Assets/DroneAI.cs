@@ -7,31 +7,77 @@ public class DroneAI : MonoBehaviour
     public bool isAnchor = false;
     public DroneSettings droneSettings;
 
+    // PID
+    private struct PidState 
+    {
+        public float integral;
+        public float lastError;
+        public float lastDerivative;
+    }
+    private Dictionary<DroneAI, PidState> pidStorage = new Dictionary<DroneAI, PidState>();
+
     // Zmienne pomocnicze misji
     private int currentTargetIndex = 0;
     private float timeInCurrentLeg = 0f;
     private Vector3 lastLegStartPosition;
     private Vector3 estimatedPosition;
     private Vector3 currentGyroDrift; // Skumulowany błąd kątowy
+    private float uwbTimer = 0f;
+
+    public UWBTransmission transmissionNode;
 
     void Start()
     {
+        if (transmissionNode == null)
+        {
+            transmissionNode = Object.FindFirstObjectByType<UWBTransmission>();
+        }
+
         estimatedPosition = transform.position; 
         lastLegStartPosition = estimatedPosition;
+
+        if (droneSettings != null)
+        {
+            float interval = droneSettings.uwbIntervalMs / 1000f;
+            uwbTimer = Random.Range(0f, interval);
+        }
     }
 
     void FixedUpdate()
     {
         UpdateDrift();
-
+        UpdateUWB();
 
         Vector3 totalForce = Vector3.zero;
 
-        Vector3 missionForce = CalculateMissionForce();
-        totalForce += missionForce;
+        totalForce += CalculateMissionForce();
+        totalForce += CalculateSpringForce();
 
         transform.position += StripYAxis(totalForce);
         DrawConnections();
+    }
+
+    void UpdateUWB()
+    {
+        if (transmissionNode == null || droneSettings == null) return;
+
+        uwbTimer += Time.fixedDeltaTime;
+        float interval = droneSettings.uwbIntervalMs / 1000f;
+
+        if (uwbTimer >= interval)
+        {
+            foreach (var c in connections)
+            {
+                if (c.target == null) continue;
+                
+                // Realny dystans zaszumiony błędem pomiarowym (np. 2cm)
+                float realDist = Vector3.Distance(transform.position, c.target.transform.position);
+                float noisyDist = realDist + Random.Range(-0.1f, 0.1f); // Błąd 0.1 jednostki (ok. 1.6cm w Twojej skali)
+
+                transmissionNode.PushMeasurement(this, c.target, noisyDist);
+            }
+            uwbTimer = 0f;
+        }
     }
 
     Vector3 CalculateMissionForce()
@@ -72,7 +118,58 @@ public class DroneAI : MonoBehaviour
         return noisyMove;
     }
 
-    void UpdateDrift() 
+    Vector3 CalculateSpringForce()
+    {
+        Vector3 totalSpringForce = Vector3.zero;
+
+        foreach (var c in connections)
+        {
+            if (c.target == null) continue;
+
+            if (transmissionNode.TryGetDistance(this, c.target, out var data))
+            {
+                // 1. Kierunek (tylko kąt, tak jak chciałeś)
+                Vector3 directionToTarget = (c.target.transform.position - transform.position).normalized;
+
+                // 2. Pobieramy/Tworzymy stan PID dla tego sąsiada
+                if (!pidStorage.TryGetValue(c.target, out PidState state)) state = new PidState();
+
+                // 3. Obliczamy błąd na podstawie UWB
+                float currentDist = data.distance;
+                float error = currentDist - c.desiredDistance;
+                float dt = Time.fixedDeltaTime;
+
+                // --- PID CORE ---
+                // P
+                float pTerm = error * droneSettings.P;
+
+                // I
+                state.integral += error * dt;
+                float iTerm = state.integral * droneSettings.I;
+
+                // D (z filtrowaniem z Twojego settingsa)
+                float rawDerivative = (error - state.lastError) / dt;
+                state.lastDerivative = Mathf.Lerp(state.lastDerivative, rawDerivative, droneSettings.derivativeSmoothing);
+                float dTerm = state.lastDerivative * droneSettings.D;
+
+                // 4. Zapisujemy stan do pamięci na następną klatkę
+                state.lastError = error;
+                pidStorage[c.target] = state;
+
+                // 5. Wynikowa siła
+                float pidOutput = pTerm + iTerm + dTerm;
+
+                // DODAJ TO: Limit siły na klatkę. 
+                // Przy skali 1m = 6u, limit 0.5 - 1.0 powinien być bezpieczny
+                pidOutput = Mathf.Clamp(pidOutput, -1.0f, 1.0f); 
+
+                totalSpringForce += directionToTarget * pidOutput;
+            }
+        }
+        return totalSpringForce;
+    }
+
+    void UpdateDrift()
     {
         // Co klatkę żyroskop "pływa" o mały ułamek stopnia
         currentGyroDrift.x += Random.Range(-droneSettings.driftSpeed, droneSettings.driftSpeed);
