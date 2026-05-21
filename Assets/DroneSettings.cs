@@ -28,6 +28,9 @@ public class DroneSettings
     [Range(0f, 1f)]
     public float drag = 0.95f;
 
+    [Header("Swarm (VFF + ORCA)")]
+    public SwarmSteeringSettings swarm = new SwarmSteeringSettings();
+
     [Header("Other")]
     public Mission mission;
 

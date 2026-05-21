@@ -41,6 +41,13 @@ public class DroneAI : MonoBehaviour
     private Vector3 springForce;
     private Vector3 totalMovement;
 
+    private Vector3 simulatedVelocity;
+    private Vector3 vffPreferredVelocity;
+    private Vector3 vffSafeVelocity;
+    private readonly List<DroneAI> neighborBuffer = new List<DroneAI>();
+    private readonly List<Orca2D.AgentState> orcaAgentBuffer = new List<Orca2D.AgentState>();
+
+    public Vector3 SimulatedVelocity => simulatedVelocity;
     public bool debugEnabled = false;
 
     void Start()
@@ -62,6 +69,17 @@ public class DroneAI : MonoBehaviour
 
     void FixedUpdate()
     {
+        if (droneSettings != null && droneSettings.swarm.movementMode == DroneMovementMode.VffOrca)
+        {
+            FixedUpdateVffOrca();
+            return;
+        }
+
+        FixedUpdatePidSpring();
+    }
+
+    void FixedUpdatePidSpring()
+    {
         UpdateDrift();
         UpdateUWB();
 
@@ -81,10 +99,97 @@ public class DroneAI : MonoBehaviour
             totalMovement = totalMovement.normalized * maxDistancePerFrame;
         }
 
-        // 5. Aplikujemy ruch
+        Vector3 prevPos = transform.position;
         transform.position += totalMovement;
+        simulatedVelocity = totalMovement / Time.fixedDeltaTime;
 
         DrawConnections();
+        DrawSteeringDebug(prevPos);
+    }
+
+    void FixedUpdateVffOrca()
+    {
+        float dt = Time.fixedDeltaTime;
+        Vector3 prevPos = transform.position;
+
+        AdvanceMissionGhost();
+        UpdateUWB();
+
+        SwarmSteeringSettings swarm = droneSettings.swarm;
+        SwarmRegistry.GetNeighborsInRadius(this, swarm.perceptionRadius, neighborBuffer);
+
+        vffPreferredVelocity = VffSteering.ComputePreferredVelocity(
+            this,
+            neighborBuffer,
+            estimatedPosition,
+            swarm,
+            droneSettings.horizontalSpeed);
+
+        Orca2D.FillAgentStates(this, SwarmRegistry.All, swarm.orcaNeighborRadius, orcaAgentBuffer);
+
+        Vector2 pos2 = new Vector2(transform.position.x, transform.position.z);
+        Vector2 vel2 = new Vector2(simulatedVelocity.x, simulatedVelocity.z);
+        Vector2 pref2 = new Vector2(vffPreferredVelocity.x, vffPreferredVelocity.z);
+
+        Vector2 safe2 = Orca2D.ComputeSafeVelocity(
+            pos2,
+            vel2,
+            swarm.agentRadius,
+            orcaAgentBuffer,
+            swarm.orcaTimeHorizon,
+            pref2,
+            droneSettings.horizontalSpeed);
+
+        vffSafeVelocity = new Vector3(safe2.x, 0f, safe2.y);
+        simulatedVelocity = Vector3.Lerp(simulatedVelocity, vffSafeVelocity, 1f - droneSettings.drag);
+        transform.position += simulatedVelocity * dt;
+
+        if (simulatedVelocity.sqrMagnitude > 0.05f)
+        {
+            Vector3 face = simulatedVelocity.normalized;
+            face.y = 0f;
+            if (face.sqrMagnitude > 0.001f)
+                transform.rotation = Quaternion.Slerp(transform.rotation, Quaternion.LookRotation(face), 4f * dt);
+        }
+
+        missionForce = Vector3.zero;
+        springForce = Vector3.zero;
+        totalMovement = simulatedVelocity * dt;
+
+        DrawConnections();
+        DrawSteeringDebug(prevPos);
+    }
+
+    void AdvanceMissionGhost()
+    {
+        if (droneSettings?.mission?.targets == null || currentTargetIndex >= droneSettings.mission.targets.Count)
+            return;
+
+        var currentTarget = droneSettings.mission.targets[currentTargetIndex];
+        float duration = Mathf.Max(0.01f, currentTarget.timeStamp);
+        Vector3 step = (currentTarget.target / duration) * Time.fixedDeltaTime;
+
+        estimatedPosition += step;
+        timeInCurrentLeg += Time.fixedDeltaTime;
+
+        if (timeInCurrentLeg >= duration)
+        {
+            estimatedPosition = lastLegStartPosition + currentTarget.target;
+            currentTargetIndex++;
+            timeInCurrentLeg = 0f;
+            lastLegStartPosition = estimatedPosition;
+        }
+    }
+
+    void DrawSteeringDebug(Vector3 prevPos)
+    {
+        if (droneSettings == null || !droneSettings.swarm.drawSteeringVectors)
+            return;
+
+        Vector3 p = transform.position;
+        Debug.DrawRay(p, vffPreferredVelocity, Color.green, Time.fixedDeltaTime);
+        Debug.DrawRay(p, vffSafeVelocity, Color.yellow, Time.fixedDeltaTime);
+        Debug.DrawLine(prevPos, p, Color.cyan, Time.fixedDeltaTime);
     }
 
     void UpdateUWB()
@@ -112,35 +217,7 @@ public class DroneAI : MonoBehaviour
 
     Vector3 CalculateMissionForce()
     {
-        if (droneSettings?.mission?.targets == null || currentTargetIndex >= droneSettings.mission.targets.Count)
-            return Vector3.zero;
-
-        var currentTarget = droneSettings.mission.targets[currentTargetIndex];
-        float duration = Mathf.Max(0.01f, currentTarget.timeStamp);
-
-        // 1. Wyliczamy o ile przesunąć wirtualną kotwicę w tej klatce
-        // Prędkość liniowa etapu
-        Vector3 step = (currentTarget.target / duration) * Time.fixedDeltaTime;
-
-        // 2. Przesuwamy wirtualną kotwicę (Estimated Position)
-        // To jest nasz "duch", który leci idealnie wg planu
-        estimatedPosition += step;
-        
-        timeInCurrentLeg += Time.fixedDeltaTime;
-
-        // 3. Sprawdzamy koniec etapu
-        if (timeInCurrentLeg >= duration)
-        {
-            // Snapujemy do ideału na koniec, żeby nie zbierać błędów float
-            estimatedPosition = lastLegStartPosition + currentTarget.target;
-            
-            currentTargetIndex++;
-            timeInCurrentLeg = 0f;
-            lastLegStartPosition = estimatedPosition;
-        }
-
-        // Zwracamy ZERO, bo teraz całą robotę wykona SpringForce, 
-        // który zobaczy, że estimatedPosition "uciekło" do przodu!
+        AdvanceMissionGhost();
         return Vector3.zero;
     }
 
@@ -318,6 +395,15 @@ public class DroneAI : MonoBehaviour
 
         // Kolorowanie siły PID: jeśli jest bardzo duża, wyświetl na czerwono (ostrzeżenie przed oscylacjami)
         string springColor = sMag > (droneSettings.horizontalSpeed * 0.5f) ? "#FF4444" : "#44FF44";
+
+        if (droneSettings != null && droneSettings.swarm.movementMode == DroneMovementMode.VffOrca)
+        {
+            Debug.Log($"[<color=yellow>{timeMs:F0} ms</color>] <color=cyan>Drone #{droneIndex} VFF/ORCA:</color>\n" +
+                    $"<color=green>VFF pref:</color> <b>{vffPreferredVelocity.magnitude:F3}</b> | " +
+                    $"<color=yellow>ORCA safe:</color> <b>{vffSafeVelocity.magnitude:F3}</b> | " +
+                    $"<color=orange>Move:</color> <b>{tMag:F3}</b>");
+            return;
+        }
 
         Debug.Log($"[<color=yellow>{timeMs:F0} ms</color>] <color=cyan>Drone #{droneIndex} Forces:</color>\n" +
                 $"<color=green>Mission:</color> <b>{mMag:F3}</b> | " +

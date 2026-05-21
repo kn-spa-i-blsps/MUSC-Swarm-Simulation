@@ -17,7 +17,7 @@ public class DroneTrioList
 
         for (int i = 0; i < connections.Count; i++)
         {
-            if(1 <= connections[i].x && connections[i].x <= dl.Count && 1 <= connections[i].x && connections[i].y <= dl.Count)
+            if (1 <= connections[i].x && connections[i].x <= dl.Count && 1 <= connections[i].y && connections[i].y <= dl.Count)
             ConnectTrios(dl[connections[i].x-1], dl[connections[i].y-1], connections[i].d);
         }
     }

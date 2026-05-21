@@ -65,6 +65,8 @@ public class Simulation : MonoBehaviour
             allDrones.Add(trio.c);
         }
 
+        SwarmRegistry.Register(allDrones);
+
         cameraSwitcher = GetComponent<CameraSwitcher>();
         SetupCameras();
     }
