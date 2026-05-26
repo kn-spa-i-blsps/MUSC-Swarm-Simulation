@@ -303,6 +303,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::CameraSwitcher
   cameras: []
   drones: []
+  switchKey: 17
 --- !u!114 &1880230486
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -316,33 +317,29 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Simulation
   dronePrefab: {fileID: 4067856542222702386, guid: 92f833f1f7f551765bffa45105cd2dcc, type: 3}
-  trioCount: 1
   trioDistance: 2
-  connections: []
   spawnPositions:
   - x: 0
     z: 0
-  updateSettings: 0
-  globalDroneSettings:
-    verticalSpeed: 3
-    yawSpeed: 100
-    P: 50
-    I: 0.05
-    D: 5
-    derivativeSmoothing: 0.2
-    moveSpeed: 1
-    drag: 0.95
-    mission:
-      targets:
-      - target: {x: 600, y: 0, z: 600}
-        timeStamp: 12
-    driftSpeed: 0.01
-    globalLatency: 0
-  enableWind: 1
-  windStrength: 5
-  windScale: 0.1
-  windTimeSpeed: 0.5
-  vibrationStrength: 0.2
+  - x: 30
+    z: 0
+  - x: 15
+    z: 26
+  connections:
+  - x: 1
+    y: 2
+    d: 30
+  - x: 2
+    y: 3
+    d: 30
+  - x: 1
+    y: 3
+    d: 30
+  globalDroneSettings: {fileID: 11400000, guid: a1b2c3d4e5f607182939a4b5c6d7e8f0, type: 2}
+  droneDebugNumber: 0
+  debugForces: 0
+  debugPosition: 0
+  debugInterval: 100
 --- !u!1 &1974324491
 GameObject:
   m_ObjectHideFlags: 0

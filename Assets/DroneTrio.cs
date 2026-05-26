@@ -1,32 +1,42 @@
 using UnityEngine;
 
+/// <summary>
+/// Trzy drony w rownobocznym trojkacie. Dron <c>a</c> jest kotwica (anchor),
+/// trzymane sa wszystkie 3 pary polaczen na zadanym dystansie.
+/// </summary>
 [System.Serializable]
 public class DroneTrio
 {
-    public DroneAI a, b, c;
+    /// <summary>Kotwica trio - obsluguje polaczenia z innymi trio.</summary>
+    public DroneAI a;
+    public DroneAI b;
+    public DroneAI c;
 
+    /// <summary>
+    /// Buduje trio z prefabu. b i c ulozone wokol a w trojkacie rownobocznym o boku d.
+    /// </summary>
     public DroneTrio(GameObject prefab, float d, Vector3 offset)
     {
-        a = Create(prefab, offset + new Vector3(0, 0, 0));
+        a = Spawn(prefab, offset);
         a.isAnchor = true;
 
-        b = Create(prefab, offset + new Vector3(d, 0, 0));
-        c = Create(prefab, offset + new Vector3(d / 2f, 0, 0.87f * d));
+        b = Spawn(prefab, offset + new Vector3(d, 0f, 0f));
+        c = Spawn(prefab, offset + new Vector3(d * 0.5f, 0f, d * 0.866f /* sin60 */));
 
-        ConnectInside(a, b, d);
-        ConnectInside(a, c, d);
-        ConnectInside(b, c, d);
+        BindPair(a, b, d);
+        BindPair(a, c, d);
+        BindPair(b, c, d);
     }
 
-    DroneAI Create(GameObject prefab, Vector3 pos)
+    static DroneAI Spawn(GameObject prefab, Vector3 pos)
     {
-        GameObject go = Object.Instantiate(prefab, pos, Quaternion.identity, null);
+        GameObject go = Object.Instantiate(prefab, pos, Quaternion.identity);
         return go.GetComponent<DroneAI>();
     }
 
-    void ConnectInside(DroneAI x, DroneAI y, float d)
+    static void BindPair(DroneAI x, DroneAI y, float distance)
     {
-        x.AddConnection(y, d);
-        y.AddConnection(x, d);
+        x.AddConnection(y, distance);
+        y.AddConnection(x, distance);
     }
 }

@@ -1,53 +1,47 @@
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.InputSystem;
-using System.Collections.Generic;
 
+/// <summary>
+/// Przelacznik kamer i aktywnego drona do sterowania manualnego.
+/// Po nacisnieciu <c>C</c> przechodzi do kolejnej kamery (cykliczne) i aktywuje
+/// odpowiadajacego <see cref="DroneMover"/>.
+/// </summary>
 public class CameraSwitcher : MonoBehaviour
 {
+    [Header("Wired by Simulation at Start()")]
+    [Tooltip("Lista kamer w roju (auto-wypelniana przez Simulation).")]
     public List<Camera> cameras = new List<Camera>();
+
+    [Tooltip("Lista DroneMover odpowiadajacych kamerom (auto-wypelniana przez Simulation).")]
     public List<DroneMover> drones = new List<DroneMover>();
 
-    private int currentIndex = 0;
+    [Header("Input")]
+    [Tooltip("Klawisz przelaczania kamery.")]
+    public Key switchKey = Key.C;
 
-    void Start()
-    {
-        Activate(0);
-    }
+    int currentIndex;
+
+    void Start() => Activate(0);
 
     void Update()
     {
-        var kb = Keyboard.current;
+        Keyboard kb = Keyboard.current;
         if (kb == null || cameras.Count == 0) return;
 
-        if (kb.cKey.wasPressedThisFrame)
+        if (kb[switchKey].wasPressedThisFrame)
         {
             currentIndex = (currentIndex + 1) % cameras.Count;
             Activate(currentIndex);
         }
     }
 
-    public void SetCameras(List<Camera> newCams)
-    {
-        cameras = newCams;
-    }
-
-    public void SetDrones(List<DroneMover> newDrones)
-    {
-        drones = newDrones;
-    }
-
-    void Activate(int index)
+    public void Activate(int index)
     {
         for (int i = 0; i < cameras.Count; i++)
         {
-            // 🔹 kamera
-            cameras[i].enabled = (i == index);
-
-            // 🔹 dron (sterowanie)
-            if (i < drones.Count && drones[i] != null)
-            {
-                drones[i].isActive = (i == index);
-            }
+            if (cameras[i] != null) cameras[i].enabled = (i == index);
+            if (i < drones.Count && drones[i] != null) drones[i].isActive = (i == index);
         }
     }
 }

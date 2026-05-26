@@ -1,13 +1,23 @@
-using UnityEngine;
 using System.Collections.Generic;
+using UnityEngine;
 
+/// <summary>
+/// Wspolny model sieci UWB. Trzyma najswiezszy zmierzony dystans miedzy kazda para dronow
+/// oraz timestamp pomiaru (do Smith Predictor age compensation).
+/// </summary>
+/// <remarks>
+/// To NIE jest sieć z transportowym lagiem - push/get sa natychmiastowe.
+/// Caly "lag" wynika z faktu, ze drony probkuja swoje pomiary tylko co
+/// <c>uwbIntervalMs</c>. Smith Predictor w <see cref="MuscSwarm.FormationPid"/>
+/// kompensuje wiek pomiaru korzystajac z timestampu.
+/// </remarks>
 public class UWBTransmission : MonoBehaviour
 {
-    // Struktura przechowująca dane o pojedynczym pomiarze między dwoma dronami
-    public struct MeasurementData
+    /// <summary>Pojedynczy pomiar dystansu miedzy para dronow.</summary>
+    public readonly struct MeasurementData
     {
-        public float distance;
-        public float timestamp; // Czas symulacji (Time.fixedTime)
+        public readonly float distance;
+        public readonly float timestamp; // Time.fixedTime
 
         public MeasurementData(float distance, float timestamp)
         {
@@ -16,58 +26,52 @@ public class UWBTransmission : MonoBehaviour
         }
     }
 
-    // Klucz do słownika, który reprezentuje parę dronów (niezależnie od kolejności)
-    private struct DronePair
+    /// <summary>Niekierunkowy klucz pary dronow (Drone A &lt;-&gt; Drone B == Drone B &lt;-&gt; Drone A).</summary>
+    readonly struct DronePair : System.IEquatable<DronePair>
     {
-        public int idA;
-        public int idB;
+        readonly int idA;
+        readonly int idB;
 
         public DronePair(DroneAI a, DroneAI b)
         {
-            // Sortujemy ID, aby para (0,1) i (1,0) była traktowana jako ten sam klucz
             int id1 = a.GetInstanceID();
             int id2 = b.GetInstanceID();
             idA = Mathf.Min(id1, id2);
             idB = Mathf.Max(id1, id2);
         }
 
-        // Standardowe metody dla structa używanego jako klucz w Dictionary
-        public override bool Equals(object obj) => obj is DronePair other && idA == other.idA && idB == other.idB;
+        public bool Equals(DronePair other) => idA == other.idA && idB == other.idB;
+        public override bool Equals(object obj) => obj is DronePair other && Equals(other);
         public override int GetHashCode() => System.HashCode.Combine(idA, idB);
     }
 
-    // "Tablica" przechowująca najświeższe dane o dystansach w roju
-    private Dictionary<DronePair, MeasurementData> networkState = new Dictionary<DronePair, MeasurementData>();
+    readonly Dictionary<DronePair, MeasurementData> network = new Dictionary<DronePair, MeasurementData>();
 
-    /// <summary>
-    /// Dron wywołuje tę funkcję, aby wysłać swój pomiar do "sieci"
-    /// </summary>
+    /// <summary>Liczba aktualnie sledzonych par dronow (dla diagnostyki / Inspectora).</summary>
+    public int TrackedPairs => network.Count;
+
+    /// <summary>Wpycha najnowszy pomiar dystansu do sieci. Nadpisuje poprzedni dla tej samej pary.</summary>
     public void PushMeasurement(DroneAI sender, DroneAI target, float measuredDistance)
     {
-        DronePair pair = new DronePair(sender, target);
-        
-        // Zawsze nadpisujemy – słownik przechowa najświeższą informację
-        // Używamy Time.fixedTime, bo ustaliliśmy, że to Twój "zegar prawdy"
-        networkState[pair] = new MeasurementData(measuredDistance, Time.fixedTime);
-        
-        // Opcjonalny debug:
-        // Debug.Log($"[Network] Update {sender.name}-{target.name}: {measuredDistance:F2}u at {Time.fixedTime:F2}s");
+        if (sender == null || target == null) return;
+        network[new DronePair(sender, target)] = new MeasurementData(measuredDistance, Time.fixedTime);
     }
 
-    /// <summary>
-    /// Pozwala sprawdzić, jaki jest ostatni znany dystans między dwiema jednostkami
-    /// </summary>
+    /// <summary>Probuje pobrac ostatni znany pomiar dla pary dronow.</summary>
     public bool TryGetDistance(DroneAI a, DroneAI b, out MeasurementData data)
     {
-        return networkState.TryGetValue(new DronePair(a, b), out data);
+        return network.TryGetValue(new DronePair(a, b), out data);
     }
 
-    // Przykład wizualizacji stanu sieci w konsoli (możesz wywołać np. klawiszem)
+    /// <summary>Czysci caly stan sieci (np. przy restarcie sceny).</summary>
+    public void Clear() => network.Clear();
+
+    /// <summary>Diagnostyczne wypisanie stanu sieci.</summary>
     public void PrintNetworkStatus()
     {
-        foreach (var entry in networkState)
+        foreach (var entry in network)
         {
-            Debug.Log($"Relacja {entry.Key.idA} <-> {entry.Key.idB} | Dystans: {entry.Value.distance:F2} | Czas: {entry.Value.timestamp:F3}");
+            Debug.Log($"Relation {entry.Key.GetHashCode()} | dist={entry.Value.distance:F2} | t={entry.Value.timestamp:F3}s");
         }
     }
 }

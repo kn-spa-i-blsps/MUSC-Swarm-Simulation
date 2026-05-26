@@ -1,27 +1,37 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
 
+/// <summary>
+/// Sterowanie manualne dronem z klawiatury. Aktywowany przez <see cref="CameraSwitcher"/>
+/// (jeden dron na raz). Gdy aktywny, wylacza <see cref="DroneAI"/> zeby nie walczyc o pozycje.
+/// </summary>
+/// <remarks>
+/// FIX: poprzednia wersja w Update() uzywala <c>Time.fixedDeltaTime / 2</c>,
+/// co powodowalo ruch zalezny od framerate'u. Teraz Update() uzywa <c>Time.deltaTime</c>.
+/// </remarks>
+[RequireComponent(typeof(DroneAI))]
 public class DroneMover : MonoBehaviour
 {
+    [Header("State")]
+    [Tooltip("Czy ten dron jest aktualnie sterowany przez gracza (ustawiane przez CameraSwitcher).")]
     public bool isActive = false;
-    private DroneAI ai;
 
-    void Start()
-    {
-        ai = GetComponent<DroneAI>();
-    }
+    [Header("Soft collisions")]
+    [Tooltip("Promien spheryczny do soft-pushback miedzy dronami (jednostki).")]
+    [Range(0.1f, 5f)] public float collisionRadius = 1.5f;
+
+    [Tooltip("Sila odpychania per overlap unit.")]
+    [Range(0f, 20f)] public float collisionStrength = 8f;
+
+    DroneAI ai;
+
+    void Awake() => ai = GetComponent<DroneAI>();
 
     void Update()
     {
-        if (isActive)
-        {
-            if (ai != null) ai.enabled = false;
-            HandleInput();
-        }
-        else
-        {
-            if (ai != null) ai.enabled = true;
-        }
+        if (ai != null) ai.enabled = !isActive;
+
+        if (isActive) HandleInput();
 
         ResolveCollisions();
     }
@@ -29,93 +39,54 @@ public class DroneMover : MonoBehaviour
     void OnTriggerEnter(Collider other)
     {
         if (!other.CompareTag("Drone")) return;
+        Debug.Log($"COLLISION: {gameObject.name} <-> {other.gameObject.name}");
 
-        DroneAI self = GetComponent<DroneAI>();
-        DroneAI otherDrone = other.GetComponent<DroneAI>();
-
-        string selfName = gameObject.name;
-        string otherName = other.gameObject.name;
-
-        Debug.Log($"COLLISION: {selfName} <-> {otherName}");
-
-        // 🔥 wizualizacja miejsca kolizji
-        Vector3 pointA = transform.position;
-        Vector3 pointB = other.transform.position;
-        Vector3 mid = (pointA + pointB) * 0.5f;
-
-        Debug.DrawLine(pointA, pointB, Color.red, 1f);
+        Vector3 a = transform.position;
+        Vector3 b = other.transform.position;
+        Vector3 mid = (a + b) * 0.5f;
+        Debug.DrawLine(a, b, Color.red, 1f);
         Debug.DrawRay(mid, Vector3.up * 0.5f, Color.yellow, 1f);
     }
 
     void HandleInput()
     {
-        var kb = Keyboard.current;
-        if (kb == null) return;
+        Keyboard kb = Keyboard.current;
+        if (kb == null || ai == null || ai.droneSettings == null) return;
 
-        float forward = 0f;
-        if (kb.wKey.isPressed) forward += 1f;
-        if (kb.sKey.isPressed) forward -= 1f;
+        float forward = (kb.wKey.isPressed ? 1f : 0f) - (kb.sKey.isPressed ? 1f : 0f);
+        float strafe  = (kb.dKey.isPressed ? 1f : 0f) - (kb.aKey.isPressed ? 1f : 0f);
+        float vert    = (kb.spaceKey.isPressed ? 1f : 0f) - (kb.leftCtrlKey.isPressed ? 1f : 0f);
+        float yaw     = (kb.eKey.isPressed ? 1f : 0f) - (kb.qKey.isPressed ? 1f : 0f);
 
-        float strafe = 0f;
-        if (kb.dKey.isPressed) strafe += 1f;
-        if (kb.aKey.isPressed) strafe -= 1f;
+        DroneSettings s = ai.droneSettings;
+        float dt = Time.deltaTime;
 
-        float vertical = 0f;
-        if (kb.spaceKey.isPressed) vertical += 1f;
-        if (kb.leftCtrlKey.isPressed) vertical -= 1f;
+        Vector3 horizontal = (transform.forward * forward + transform.right * strafe);
+        if (horizontal.sqrMagnitude > 1f) horizontal.Normalize();
+        Vector3 vertical = transform.up * vert;
 
-        float yaw = 0f;
-        if (kb.eKey.isPressed) yaw += 1f;
-        if (kb.qKey.isPressed) yaw -= 1f;
-
-        Vector3 move =
-            transform.forward * forward +
-            transform.right * strafe +
-            transform.up * vertical;
-
-        Vector3 horizontalMove = (transform.forward * forward + transform.right * strafe).normalized;
-        horizontalMove *= ai.droneSettings.horizontalSpeed;
-
-        // Ruch pionowy (Y)
-        Vector3 verticalMove = transform.up * vertical * ai.droneSettings.verticalSpeed;
-
-        // 3. Aplikacja ruchu i rotacji
-        // Sumujemy ruch, mnożymy przez deltę i dodajemy do pozycji
-        transform.position += (horizontalMove + verticalMove) * Time.fixedDeltaTime / 2;
-
-        // Rotacja
-        transform.Rotate(Vector3.up, yaw * ai.droneSettings.yawSpeed * Time.fixedDeltaTime, Space.Self);
+        transform.position += horizontal * s.horizontalSpeed * dt + vertical * s.verticalSpeed * dt;
+        transform.Rotate(Vector3.up, yaw * s.yawSpeed * dt, Space.Self);
     }
 
     void ResolveCollisions()
     {
-        float radius = 1.5f;
-        float strength = 8f;
-
-        Collider[] hits = Physics.OverlapSphere(transform.position, radius);
-
+        Collider[] hits = Physics.OverlapSphere(transform.position, collisionRadius);
         Vector3 push = Vector3.zero;
 
-        foreach (var h in hits)
+        for (int i = 0; i < hits.Length; i++)
         {
-            if (!h.CompareTag("Drone")) continue;
-            if (h.transform == transform) continue;
+            Collider h = hits[i];
+            if (!h.CompareTag("Drone") || h.transform == transform) continue;
 
             Vector3 dir = transform.position - h.transform.position;
             float dist = dir.magnitude;
+            if (dist < 1e-4f) continue;
 
-            if (dist < 0.0001f) continue;
-
-            // ile "w środku" jesteś
-            float overlap = radius - dist;
-
-            if (overlap > 0f)
-            {
-                push += dir.normalized * overlap;
-            }
+            float overlap = collisionRadius - dist;
+            if (overlap > 0f) push += dir.normalized * overlap;
         }
 
-        // 🔥 miękkie odpychanie w czasie
-        transform.position += push * strength * Time.deltaTime;
+        transform.position += push * collisionStrength * Time.deltaTime;
     }
 }

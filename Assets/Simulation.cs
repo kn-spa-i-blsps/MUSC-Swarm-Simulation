@@ -1,18 +1,24 @@
-// [INFO]
-// W przeliczeniu na rozmiar drona (jesli mialby byc 3,5") - jeden REALNY metr to 6 jednostek w Unity
-
-using UnityEngine;
+// [INFO] Skala: w przeliczeniu na rozmiar drona 3,5" jeden realny metr to ~6 jednostek Unity.
 using System.Collections.Generic;
-using Unity.VisualScripting;
+using UnityEngine;
 
+/// <summary>
+/// Polaczenie miedzy dwoma trio (indeksy 1-based) z zadanym dystansem miedzy kotwicami.
+/// </summary>
 [System.Serializable]
 public struct ConnectionData
 {
+    [Tooltip("Indeks trio A (1-based, indeksuje listę spawnPositions).")]
     public int x;
+
+    [Tooltip("Indeks trio B (1-based).")]
     public int y;
+
+    [Tooltip("Zadany dystans miedzy kotwicami trio A i B (jednostki Unity).")]
     public float d;
 }
 
+/// <summary>Pozycja spawnu kotwicy trio na plaszczyznie XZ.</summary>
 [System.Serializable]
 public struct SpawnPoint
 {
@@ -20,188 +26,188 @@ public struct SpawnPoint
     public float z;
 }
 
+/// <summary>
+/// Manager symulacji roju: spawnuje trio na bazie listy <see cref="spawnPositions"/>,
+/// laczy je wedlug <see cref="connections"/>, wstrzykuje DroneSettings i sklada kamery.
+/// </summary>
 [RequireComponent(typeof(CameraSwitcher))]
 public class Simulation : MonoBehaviour
 {
-    [Header("General")]
+    [Header("Spawning")]
+    [Tooltip("Prefab drona (musi miec komponent DroneAI).")]
     public GameObject dronePrefab;
-    public int trioCount = 5;
-    public float trioDistance = 2f;
-    public List<ConnectionData> connections = new List<ConnectionData>();
+
+    [Tooltip("Dystans miedzy dronami wewnatrz pojedynczego trio (rownoboczny trojkat).")]
+    [Min(0.1f)] public float trioDistance = 2f;
+
+    [Tooltip("Pozycje spawnu kotwic trio. Liczba elementow = liczba trio.")]
     public List<SpawnPoint> spawnPositions = new List<SpawnPoint>();
 
-    [Header("Drone Settings")]
+    [Tooltip("Polaczenia miedzy trio (kotwica-do-kotwicy). Indeksy 1-based z listy spawnPositions.")]
+    public List<ConnectionData> connections = new List<ConnectionData>();
+
+    [Header("Drone tuning")]
+    [Tooltip("Globalny profil dostrojenia (ScriptableObject). Wszystkie spawnowane drony go dostaja.")]
+    public DroneSettings globalDroneSettings;
+
+    [Header("Trails (wizualizacja toru lotu)")]
+    [Tooltip("Czy spawnowac slady torow lotu (TrailRenderer) na kazdym dronie. Toggle dzialajacy w runtime.")]
+    public bool enableTrails = false;
+
+    [Tooltip("Tryb trwaly: slad nigdy nie znika ani nie blaknie. Cala trasa zostaje narysowana w powietrzu na zawsze. Wylacza Duration.")]
+    public bool persistentTrails = false;
+
+    [Tooltip("Jak dlugo (sekund) slad pozostaje widoczny zanim zniknie. Ignorowane gdy Persistent zaznaczone.")]
+    [Range(0.5f, 60f)] public float trailDuration = 8f;
+
+    [Tooltip("Szerokosc sladu u zrodla (jednostki Unity). W trybie fade konczy sie szpicem na 0, w persistent jednolitej szerokosci.")]
+    [Range(0.01f, 1f)] public float trailWidth = 0.08f;
+
+    [Tooltip("Kolor sladu kotwicy trio (dron 'a').")]
+    public Color anchorTrailColor = new Color(1f, 0.35f, 0.25f, 1f);
+
+    [Tooltip("Kolor sladu pozostalych dronow (drony 'b', 'c').")]
+    public Color followerTrailColor = new Color(0.35f, 0.75f, 1f, 1f);
+
+    [Header("Debug")]
+    [Tooltip("Indeks drona do debugowania (-1 = wylacz). Wymaga debugForces lub debugPosition.")]
     public int droneDebugNumber = 0;
+
+    [Tooltip("Loguj sily / step na konsole.")]
     public bool debugForces = false;
+
+    [Tooltip("Loguj pozycje na konsole.")]
     public bool debugPosition = false;
-    public int debugInterval = 100; // Co ile milisekund wyrzucić log do konsoli
-    private float lastDebugTime = 0f;
-    private DroneAI lastDebuggedDrone;
-    public bool updateDroneSettings = false;
-    public DroneSettings globalDroneSettings = new DroneSettings();
 
-    [Header("Advanced Wind & Noise")]
-    public bool enableWind = true;
-    public float windStrength = 5f;
-    public float windScale = 0.1f; 
-    public float windTimeSpeed = 0.5f; 
-    public float vibrationStrength = 0.2f; // Drgania silników
+    [Tooltip("Okres logowania debugu (ms).")]
+    [Range(10, 2000)] public int debugInterval = 100;
 
-    private CameraSwitcher cameraSwitcher;
+    // ----- Stan runtime ------------------------------------------------------------
 
     DroneTrioList trios;
-    private List<DroneAI> allDrones = new List<DroneAI>(); // Płaska lista dla szybkiego dostępu
+    readonly List<DroneAI> allDrones = new List<DroneAI>();
+    CameraSwitcher cameraSwitcher;
+    float lastDebugTime;
+    DroneAI lastDebuggedDrone;
+
+    public IReadOnlyList<DroneAI> AllDrones => allDrones;
+    public int TrioCount => trios?.dl.Count ?? 0;
+
+    // ----- Lifecycle ---------------------------------------------------------------
 
     void Start()
     {
+        if (dronePrefab == null)
+        {
+            Debug.LogError("[Simulation] Brak dronePrefab - nic nie zostanie zaspawnowane.", this);
+            enabled = false;
+            return;
+        }
+
+        if (globalDroneSettings == null)
+        {
+            Debug.LogError("[Simulation] Brak globalDroneSettings (ScriptableObject) - przeciagnij asset w Inspectorze.", this);
+            enabled = false;
+            return;
+        }
+
         trios = new DroneTrioList(dronePrefab, trioDistance, connections, spawnPositions);
         trios.SyncDroneSettings(globalDroneSettings);
 
         allDrones.Clear();
-        foreach (var trio in trios.dl)
+        foreach (DroneTrio trio in trios.dl)
         {
             allDrones.Add(trio.a);
             allDrones.Add(trio.b);
             allDrones.Add(trio.c);
         }
-
         SwarmRegistry.Register(allDrones);
 
         cameraSwitcher = GetComponent<CameraSwitcher>();
         SetupCameras();
+        ApplyTrails();
     }
 
     void FixedUpdate()
     {
-        // Sprawdzamy czy czas na kolejną porcję debugu
-        if (Time.fixedTime >= lastDebugTime + debugInterval / 1000f)
-        {
-            HandleDronesDebug();
-            lastDebugTime = Time.fixedTime;
-        }
-
-        trios.SyncDroneSettings(globalDroneSettings);
-        /*if(updateDroneSettings)
-        {
-            trios.SyncDroneSettings(globalDroneSettings);
-            updateDroneSettings = false;
-        }*/
-        // Tutaj opcjonalnie wywołaj SyncPhysicsSettings() jeśli go odkomentujesz
+        if (Time.fixedTime < lastDebugTime + debugInterval / 1000f) return;
+        lastDebugTime = Time.fixedTime;
+        HandleDronesDebug();
     }
+
+    void OnValidate()
+    {
+        // Pozwala togglowac slady i zmieniac kolor/dl. zycia/szerokosc w trakcie gry
+        // bez restartu - przepina kazdy istniejacy TrailRenderer na biezace ustawienia.
+        if (!Application.isPlaying) return;
+        if (allDrones.Count == 0) return;
+        ApplyTrails();
+    }
+
+    // ----- Debug -------------------------------------------------------------------
 
     void HandleDronesDebug()
     {
-        // 1. Sprawdzamy zakres
-        if (droneDebugNumber >= 0 && droneDebugNumber < allDrones.Count)
+        if (droneDebugNumber < 0 || droneDebugNumber >= allDrones.Count)
         {
-            var currentDrone = allDrones[droneDebugNumber];
-
-            // 2. Jeśli zmienił się debugowany dron, wyłącz flagę u starego
-            if (lastDebuggedDrone != null && lastDebuggedDrone != currentDrone)
-            {
+            if (lastDebuggedDrone != null)
                 lastDebuggedDrone.debugEnabled = false;
-            }
-
-            if (currentDrone == null) return;
-
-            // 3. Aktywujemy debug u aktualnego drona
-            // Robimy to co interwał, ale flaga może być ustawiona na stałe
-            currentDrone.debugEnabled = (debugForces || debugPosition);
-            lastDebuggedDrone = currentDrone;
-
-            // 4. Wywołujemy logi w konsoli
-            if (debugForces) currentDrone.DebugForces(droneDebugNumber);
-            if (debugPosition) currentDrone.DebugPosition(droneDebugNumber);
-        }
-        else if (lastDebuggedDrone != null)
-        {
-            // Jeśli wyjdziemy poza zakres (np. wpiszesz -1), wyłącz debug u ostatniego
-            lastDebuggedDrone.debugEnabled = false;
-        }
-    }
-
-    /*void SyncPhysicsSettings()
-    {
-        foreach (var trio in trios)
-        {
-            UpdateDroneForce(trio.a);
-            UpdateDroneForce(trio.b);
-            UpdateDroneForce(trio.c);
-        }
-    }
-
-    void UpdateDroneForce(DroneAI drone)
-    {
-        if (!enableWind) {
-            drone.externalForce = Vector3.zero;
             return;
         }
 
-        // Używamy pozycji XYZ do wygenerowania unikalnego wiatru dla tego drona
-        float x = drone.transform.position.x * windScale;
-        float z = drone.transform.position.z * windScale;
-        float t = Time.time * windTimeSpeed;
+        DroneAI current = allDrones[droneDebugNumber];
+        if (current == null) return;
 
-        // Generujemy szum dla każdej osi oddzielnie
-        float windX = (Mathf.PerlinNoise(x + t, z) - 0.5f) * 2f;
-        float windZ = (Mathf.PerlinNoise(x, z + t) - 0.5f) * 2f;
-        
-        Vector3 windVector = new Vector3(windX, 0, windZ) * windStrength;
-        
-        // Dodajemy turbulencje silnika (drgania wysokiej częstotliwości)
-        Vector3 motorNoise = Random.insideUnitSphere * vibrationStrength;
+        if (lastDebuggedDrone != null && lastDebuggedDrone != current)
+            lastDebuggedDrone.debugEnabled = false;
 
-        drone.externalForce = windVector + motorNoise;
+        current.debugEnabled = debugForces || debugPosition;
+        lastDebuggedDrone = current;
+
+        if (debugForces) current.DebugForces(droneDebugNumber);
+        if (debugPosition) current.DebugPosition(droneDebugNumber);
     }
-
-    public void SyncDroneSettings()
-    {
-        foreach (var trio in trios)
-        {
-            if (trio == null) continue;
-
-            ApplyToDrone(trio.a);
-            ApplyToDrone(trio.b);
-            ApplyToDrone(trio.c);
-        }
-    }
-
-    void ConnectTrios()
-    {
-        ConnectAnchors(trios[0], trios[1], 9f);
-        ConnectAnchors(trios[0], trios[2], 9f);
-        ConnectAnchors(trios[1], trios[2], 7f);
-        ConnectAnchors(trios[1], trios[3], 9f);
-        ConnectAnchors(trios[2], trios[3], 7f);
-        ConnectAnchors(trios[2], trios[4], 9f);
-        ConnectAnchors(trios[3], trios[4], 9f);
-    }
-
-    void ConnectAnchors(DroneTrio drt1, DroneTrio drt2, float d)
-    {
-        drt1.a.AddConnection(drt2.a, d);
-        drt2.a.AddConnection(drt1.a, d);
-    }*/
 
     void SetupCameras()
     {
-        CameraSwitcher cs = cameraSwitcher;
+        if (cameraSwitcher == null) return;
 
-        foreach (var t in trios.dl)
+        cameraSwitcher.cameras.Clear();
+        cameraSwitcher.drones.Clear();
+        foreach (DroneTrio t in trios.dl)
         {
-            cs.cameras.Add(t.a.GetComponentInChildren<Camera>());
-            cs.drones.Add(t.a.GetComponent<DroneMover>());
+            Camera cam = t.a.GetComponentInChildren<Camera>();
+            DroneMover mover = t.a.GetComponent<DroneMover>();
+            if (cam != null) cameraSwitcher.cameras.Add(cam);
+            if (mover != null) cameraSwitcher.drones.Add(mover);
         }
     }
 
-    void DebugTrio(int n)
-    {
-        var drone = trios.dl[n].a;
-        Vector3 pos = drone.transform.position;
-        float timeMs = Time.fixedTime * 1000f;
+    // ----- Trails ------------------------------------------------------------------
 
-        // Formatowanie: czas w kolorze żółtym, pozycja z ograniczonymi miejscami po przecinku
-        Debug.Log($"[<color=yellow>{timeMs:F0} ms</color>] Drone <color=cyan>#{n}</color> | " +
-                $"Pos: (<b>{pos.x:F2}</b>, <b>{pos.y:F2}</b>, <b>{pos.z:F2}</b>)");
+    /// <summary>
+    /// Dopina (lub aktualizuje) komponent <see cref="MuscSwarm.DroneTrail"/> na kazdym dronie.
+    /// Wywolane raz z Start() i z OnValidate() w trakcie gry zeby togglowac live.
+    /// </summary>
+    void ApplyTrails()
+    {
+        foreach (DroneAI d in allDrones)
+        {
+            if (d == null) continue;
+
+            MuscSwarm.DroneTrail t = d.GetComponent<MuscSwarm.DroneTrail>();
+            if (enableTrails)
+            {
+                if (t == null) t = d.gameObject.AddComponent<MuscSwarm.DroneTrail>();
+                Color c = d.isAnchor ? anchorTrailColor : followerTrailColor;
+                t.Configure(c, trailDuration, trailWidth, persistentTrails);
+                t.SetEmitting(true);
+            }
+            else if (t != null)
+            {
+                t.SetEmitting(false);
+                t.ClearTrail();
+            }
+        }
     }
 }

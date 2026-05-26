@@ -1,40 +1,56 @@
-using UnityEngine;
 using System.Collections.Generic;
+using UnityEngine;
 
+/// <summary>
+/// Zbior wszystkich trio w roju + ich miedzytrio polaczenia. Tworzy je z prefabu
+/// i list <see cref="SpawnPoint"/> oraz <see cref="ConnectionData"/> dostarczonych przez <see cref="Simulation"/>.
+/// </summary>
 public class DroneTrioList
 {
-    public List<DroneTrio> dl = new List<DroneTrio>();
+    /// <summary>Wszystkie trio w roju.</summary>
+    public readonly List<DroneTrio> dl = new List<DroneTrio>();
 
-    public DroneTrioList(GameObject dronePrefab, float trioDistance, List<ConnectionData> connections, List<SpawnPoint> spawnPositions)
+    public DroneTrioList(
+        GameObject dronePrefab,
+        float trioDistance,
+        List<ConnectionData> connections,
+        List<SpawnPoint> spawnPositions)
     {
         for (int i = 0; i < spawnPositions.Count; i++)
         {
-            Vector3 position = new Vector3(spawnPositions[i].x, 0f, spawnPositions[i].z);
-            DroneTrio t = new DroneTrio(dronePrefab, trioDistance, position);
-
-            dl.Add(t);
+            Vector3 pos = new Vector3(spawnPositions[i].x, 0f, spawnPositions[i].z);
+            dl.Add(new DroneTrio(dronePrefab, trioDistance, pos));
         }
 
         for (int i = 0; i < connections.Count; i++)
         {
-            if (1 <= connections[i].x && connections[i].x <= dl.Count && 1 <= connections[i].y && connections[i].y <= dl.Count)
-            ConnectTrios(dl[connections[i].x-1], dl[connections[i].y-1], connections[i].d);
+            ConnectionData cd = connections[i];
+            // Walidacja indeksow (1-based). Pomijaj wpisy spoza zakresu, ale loguj zeby user widzial.
+            if (cd.x < 1 || cd.x > dl.Count || cd.y < 1 || cd.y > dl.Count)
+            {
+                Debug.LogWarning($"[DroneTrioList] Connection[{i}] indices ({cd.x},{cd.y}) out of range [1..{dl.Count}], pomijam.");
+                continue;
+            }
+            ConnectTrios(dl[cd.x - 1], dl[cd.y - 1], cd.d);
         }
     }
 
-    void ConnectTrios(DroneTrio x, DroneTrio y, float d)
+    static void ConnectTrios(DroneTrio x, DroneTrio y, float distance)
     {
-        x.a.AddConnection(y.a, d);
-        y.a.AddConnection(x.a, d);
+        // Lacz kotwice z kotwica.
+        x.a.AddConnection(y.a, distance);
+        y.a.AddConnection(x.a, distance);
     }
 
-    public void SyncDroneSettings(DroneSettings droneSettings)
+    /// <summary>Wstrzyk profilu dostrojenia do wszystkich dronow we wszystkich trio.</summary>
+    public void SyncDroneSettings(DroneSettings settings)
     {
         for (int i = 0; i < dl.Count; i++)
         {
-            dl[i].a.droneSettings = droneSettings;
-            dl[i].b.droneSettings = droneSettings;
-            dl[i].c.droneSettings = droneSettings;
+            DroneTrio t = dl[i];
+            t.a.droneSettings = settings;
+            t.b.droneSettings = settings;
+            t.c.droneSettings = settings;
         }
     }
 }

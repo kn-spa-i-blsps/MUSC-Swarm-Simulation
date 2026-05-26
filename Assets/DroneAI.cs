@@ -1,414 +1,258 @@
-using UnityEngine;
 using System.Collections.Generic;
+using MuscSwarm;
+using UnityEngine;
 
+/// <summary>
+/// Orchestrator pojedynczego drona: spina sterowanie (PID+Spring lub VFF+ORCA),
+/// sampler UWB, ducha misji i debug. Cala "ciezka" logika siedzi w klasach pomocniczych
+/// w namespace <see cref="MuscSwarm"/>.
+/// </summary>
+[DisallowMultipleComponent]
 public class DroneAI : MonoBehaviour
 {
-    public List<Connection> connections = new List<Connection>();
-    public bool isAnchor = false;
+    // ----- Konfiguracja widoczna w Inspectorze ------------------------------------
+
+    [Header("Configuration")]
+    [Tooltip("Profil dostrojenia (ScriptableObject). Mozesz wspoldzielic miedzy dronami.")]
     public DroneSettings droneSettings;
 
-    // PID
-    private struct PidState 
-    {
-        public float integral;
-        public float lastError;
-        public float lastVelocity;
-
-        // Smith Predictor
-        public float internalModelDist;  
-        public float driftCorrection;    
-        public Vector3 lastAppliedForce; 
-        public bool initialized;
-
-        // Estymacja prędkości sąsiada
-        public float neighborVelocity;   // Prędkość zbliżania/oddalania się celu
-        public float lastUwbDistance;
-        public float lastUwbTimestamp;
-    }
-    private Dictionary<DroneAI, PidState> pidStorage = new Dictionary<DroneAI, PidState>();
-
-    // Zmienne pomocnicze misji
-    private int currentTargetIndex = 0;
-    private float timeInCurrentLeg = 0f;
-    private Vector3 lastLegStartPosition;
-    private Vector3 estimatedPosition;
-    private Vector3 currentGyroDrift; // Skumulowany błąd kątowy
-    private float uwbTimer = 0f;
-
+    [Tooltip("Wspolny model sieci UWB. Auto-wyszukiwany w scenie jesli pusty.")]
     public UWBTransmission transmissionNode;
 
-    private Vector3 missionForce;
-    private Vector3 springForce;
-    private Vector3 totalMovement;
+    [Header("Topology")]
+    [Tooltip("Polaczenia z innymi dronami (lista par: sasiad + zadany dystans).")]
+    public List<Connection> connections = new List<Connection>();
 
-    private Vector3 simulatedVelocity;
-    private Vector3 vffPreferredVelocity;
-    private Vector3 vffSafeVelocity;
-    private readonly List<DroneAI> neighborBuffer = new List<DroneAI>();
-    private readonly List<Orca2D.AgentState> orcaAgentBuffer = new List<Orca2D.AgentState>();
+    [Tooltip("Czy ten dron jest kotwica trio. Kotwice ignoruja niesasiadow ktorzy nie sa kotwicami.")]
+    public bool isAnchor = false;
 
-    public Vector3 SimulatedVelocity => simulatedVelocity;
+    [Header("Debug")]
+    [Tooltip("Wlacza rysowanie 'anteny' i krzyzyka pod dronem oraz logi z Simulation.")]
     public bool debugEnabled = false;
+
+    // ----- Stan runtime ------------------------------------------------------------
+
+    readonly MissionGhost missionGhost = new MissionGhost();
+    readonly UwbSampler uwbSampler = new UwbSampler();
+    readonly FormationPid formationPid = new FormationPid();
+    readonly SwarmSteeringPipeline swarmSteering = new SwarmSteeringPipeline();
+
+    Vector3 simulatedVelocity;        // aktualna predkosc (wykorzystywana przez VFF i ORCA)
+    Vector3 lastFrameDisplacement;    // realne przesuniecie w ostatniej klatce (uzywane przez debug)
+    Vector3 lastDebugSpringStep;      // do logowania DebugForces
+    Vector3 lastDebugMissionStep;
+
+    /// <summary>Bieżąca oszacowana predkosc (jed/s). Używane przez VFF/ORCA innych dronow.</summary>
+    public Vector3 SimulatedVelocity => simulatedVelocity;
+
+    // ----- Lifecycle ---------------------------------------------------------------
 
     void Start()
     {
         if (transmissionNode == null)
-        {
             transmissionNode = Object.FindFirstObjectByType<UWBTransmission>();
-        }
 
-        estimatedPosition = transform.position; 
-        lastLegStartPosition = estimatedPosition;
-
-        if (droneSettings != null)
+        if (droneSettings == null)
         {
-            float interval = droneSettings.uwbIntervalMs / 1000f;
-            uwbTimer = Random.Range(0f, interval);
+            Debug.LogError($"[{name}] Brak DroneSettings - dron sie nie ruszy. Przeciagnij SO w Inspectorze.", this);
+            enabled = false;
+            return;
         }
+
+        Vector3 startPos = transform.position;
+        missionGhost.Reset(droneSettings.mission, startPos);
+        uwbSampler.Reset(droneSettings);
     }
 
     void FixedUpdate()
     {
-        if (droneSettings != null && droneSettings.swarm.movementMode == DroneMovementMode.VffOrca)
-        {
-            FixedUpdateVffOrca();
-            return;
-        }
-
-        FixedUpdatePidSpring();
-    }
-
-    void FixedUpdatePidSpring()
-    {
-        UpdateDrift();
-        UpdateUWB();
-
-        Vector3 totalForce = Vector3.zero;
-
-        missionForce = CalculateMissionForce();
-        springForce = CalculateSpringForce();
-
-        totalForce += missionForce;
-        totalForce += springForce;
-
-        totalMovement = totalForce - totalForce * droneSettings.drag;
-
-        float maxDistancePerFrame = droneSettings.horizontalSpeed * Time.fixedDeltaTime;
-        if (totalMovement.magnitude > maxDistancePerFrame)
-        {
-            totalMovement = totalMovement.normalized * maxDistancePerFrame;
-        }
+        if (droneSettings == null) return;
 
         Vector3 prevPos = transform.position;
-        transform.position += totalMovement;
-        simulatedVelocity = totalMovement / Time.fixedDeltaTime;
+        float dt = Time.fixedDeltaTime;
+        float now = Time.fixedTime;
+
+        // Duch misji + sampler UWB tykaja niezaleznie od trybu.
+        missionGhost.Advance(dt);
+        uwbSampler.Tick(dt, this, transmissionNode);
+
+        Vector3 step;
+        switch (droneSettings.movementMode)
+        {
+            case DroneMovementMode.VffOrca:
+                step = StepVffOrca(dt);
+                break;
+
+            default:
+                step = StepPidSpring(dt, now);
+                break;
+        }
+
+        // Obstacle avoidance dziala w obu trybach niezaleznie - dodawane do kroku PRZED cap.
+        Vector3 avoidance = ObstacleAvoidance.ComputeRepulsion(
+            transform.position,
+            droneSettings.droneAvoidBuffer,
+            droneSettings.obstacleSensingMultiplier,
+            droneSettings.obstacleAvoidanceStrength);
+
+        if (avoidance.sqrMagnitude > 1e-6f)
+        {
+            step += avoidance * (dt * droneSettings.velocityRetention);
+            step = ClampPlanarStep(step, droneSettings.horizontalSpeed * dt, droneSettings.verticalSpeed * dt);
+        }
+
+        transform.position += step;
+        lastFrameDisplacement = step;
+        simulatedVelocity = step / Mathf.Max(dt, 1e-5f);
 
         DrawConnections();
         DrawSteeringDebug(prevPos);
     }
 
-    void FixedUpdateVffOrca()
+    // ----- Tryb PID + Spring -------------------------------------------------------
+
+    Vector3 StepPidSpring(float dt, float now)
     {
-        float dt = Time.fixedDeltaTime;
-        Vector3 prevPos = transform.position;
-
-        AdvanceMissionGhost();
-        UpdateUWB();
-
-        SwarmSteeringSettings swarm = droneSettings.swarm;
-        SwarmRegistry.GetNeighborsInRadius(this, swarm.perceptionRadius, neighborBuffer);
-
-        vffPreferredVelocity = VffSteering.ComputePreferredVelocity(
+        Vector3 raw = formationPid.ComputeStepDisplacement(
             this,
-            neighborBuffer,
-            estimatedPosition,
-            swarm,
-            droneSettings.horizontalSpeed);
+            missionGhost.Position,
+            simulatedVelocity,
+            droneSettings,
+            transmissionNode,
+            dt,
+            now);
 
-        Orca2D.FillAgentStates(this, SwarmRegistry.All, swarm.orcaNeighborRadius, orcaAgentBuffer);
+        // Tlumienie - utrzymaj velocityRetention*100% ruchu, reszta wygas.
+        // (Stara wersja robila 'totalForce - totalForce*drag' = totalForce*(1-drag); zachowujemy semantyke.)
+        raw *= droneSettings.velocityRetention;
 
-        Vector2 pos2 = new Vector2(transform.position.x, transform.position.z);
-        Vector2 vel2 = new Vector2(simulatedVelocity.x, simulatedVelocity.z);
-        Vector2 pref2 = new Vector2(vffPreferredVelocity.x, vffPreferredVelocity.z);
+        // Caps niezalezne dla poziomu i pionu (drony fizycznie maja osobne limity).
+        raw = ClampPlanarStep(raw, droneSettings.horizontalSpeed * dt, droneSettings.verticalSpeed * dt);
 
-        Vector2 safe2 = Orca2D.ComputeSafeVelocity(
-            pos2,
-            vel2,
-            swarm.agentRadius,
-            orcaAgentBuffer,
-            swarm.orcaTimeHorizon,
-            pref2,
-            droneSettings.horizontalSpeed);
+        lastDebugSpringStep = raw;
+        lastDebugMissionStep = Vector3.zero; // mission spring jest w PID; zachowane dla zgodnosci debugu
+        return raw;
+    }
 
-        vffSafeVelocity = new Vector3(safe2.x, 0f, safe2.y);
-        simulatedVelocity = Vector3.Lerp(simulatedVelocity, vffSafeVelocity, 1f - droneSettings.drag);
-        transform.position += simulatedVelocity * dt;
+    /// <summary>Cap kroku: oddzielnie XZ na horizontalMax, oddzielnie Y na verticalMax.</summary>
+    static Vector3 ClampPlanarStep(Vector3 step, float horizontalMax, float verticalMax)
+    {
+        Vector2 horizontal = new Vector2(step.x, step.z);
+        if (horizontal.sqrMagnitude > horizontalMax * horizontalMax)
+            horizontal = horizontal.normalized * horizontalMax;
 
-        if (simulatedVelocity.sqrMagnitude > 0.05f)
+        float vertical = Mathf.Clamp(step.y, -verticalMax, verticalMax);
+
+        return new Vector3(horizontal.x, vertical, horizontal.y);
+    }
+
+    // ----- Tryb VFF + ORCA ---------------------------------------------------------
+
+    Vector3 StepVffOrca(float dt)
+    {
+        Vector3 safe = swarmSteering.ComputeSafeVelocity(
+            this,
+            missionGhost.Position,
+            simulatedVelocity,
+            droneSettings);
+
+        // ORCA/VFF dzialaja w plaszczyznie XZ - Y musimy dolozyc niezaleznie.
+        // Prosta proporcjonalna kontrola wysokosci: dazymy do Y ducha celu.
+        float verticalError = missionGhost.Position.y - transform.position.y;
+        float verticalVel = Mathf.Clamp(
+            verticalError * droneSettings.missionP,
+            -droneSettings.verticalSpeed,
+            droneSettings.verticalSpeed);
+        safe.y = verticalVel;
+
+        // Smooth blend miedzy aktualnym a nowym safe velocity (drag-like inertia).
+        float keep = Mathf.Clamp01(1f - droneSettings.velocityRetention);
+        Vector3 blended = Vector3.Lerp(simulatedVelocity, safe, keep);
+
+        // Rotacja w kierunku ruchu (kosmetyka).
+        if (blended.sqrMagnitude > 0.05f)
         {
-            Vector3 face = simulatedVelocity.normalized;
-            face.y = 0f;
+            Vector3 face = blended; face.y = 0f;
             if (face.sqrMagnitude > 0.001f)
                 transform.rotation = Quaternion.Slerp(transform.rotation, Quaternion.LookRotation(face), 4f * dt);
         }
 
-        missionForce = Vector3.zero;
-        springForce = Vector3.zero;
-        totalMovement = simulatedVelocity * dt;
-
-        DrawConnections();
-        DrawSteeringDebug(prevPos);
+        Vector3 step = blended * dt;
+        lastDebugSpringStep = step;
+        lastDebugMissionStep = Vector3.zero;
+        return step;
     }
 
-    void AdvanceMissionGhost()
-    {
-        if (droneSettings?.mission?.targets == null || currentTargetIndex >= droneSettings.mission.targets.Count)
-            return;
+    // ----- Public API uzywane przez inne klasy -------------------------------------
 
-        var currentTarget = droneSettings.mission.targets[currentTargetIndex];
-        float duration = Mathf.Max(0.01f, currentTarget.timeStamp);
-        Vector3 step = (currentTarget.target / duration) * Time.fixedDeltaTime;
-
-        estimatedPosition += step;
-        timeInCurrentLeg += Time.fixedDeltaTime;
-
-        if (timeInCurrentLeg >= duration)
-        {
-            estimatedPosition = lastLegStartPosition + currentTarget.target;
-            currentTargetIndex++;
-            timeInCurrentLeg = 0f;
-            lastLegStartPosition = estimatedPosition;
-        }
-    }
-
-    void DrawSteeringDebug(Vector3 prevPos)
-    {
-        if (droneSettings == null || !droneSettings.swarm.drawSteeringVectors)
-            return;
-
-        Vector3 p = transform.position;
-        Debug.DrawRay(p, vffPreferredVelocity, Color.green, Time.fixedDeltaTime);
-        Debug.DrawRay(p, vffSafeVelocity, Color.yellow, Time.fixedDeltaTime);
-        Debug.DrawLine(prevPos, p, Color.cyan, Time.fixedDeltaTime);
-    }
-
-    void UpdateUWB()
-    {
-        if (transmissionNode == null || droneSettings == null) return;
-
-        uwbTimer += Time.fixedDeltaTime;
-        float interval = droneSettings.uwbIntervalMs / 1000f;
-
-        if (uwbTimer >= interval)
-        {
-            foreach (var c in connections)
-            {
-                if (c.target == null) continue;
-                
-                // Realny dystans zaszumiony błędem pomiarowym (np. 2cm)
-                float realDist = Vector3.Distance(transform.position, c.target.transform.position);
-                float noisyDist = realDist + Random.Range(-0.1f, 0.1f); // Błąd 0.1 jednostki (ok. 1.6cm w Twojej skali)
-
-                transmissionNode.PushMeasurement(this, c.target, noisyDist);
-            }
-            uwbTimer = 0f;
-        }
-    }
-
-    Vector3 CalculateMissionForce()
-    {
-        AdvanceMissionGhost();
-        return Vector3.zero;
-    }
-
-    Vector3 CalculateSpringForce()
-    {
-        Vector3 totalSpringForce = Vector3.zero;
-        float dt = Time.fixedDeltaTime;
-
-        // --- 1. SIŁA OD WIRTUALNEJ KOTWICY (MISJA) ---
-        // To jest ta "gumka", która ciągnie drona za celem misji
-        Vector3 missionError = estimatedPosition - transform.position;
-        
-        // Używamy osobnych wzmocnień dla misji, żeby leciał "szybko, ale nie na full pizdę"
-        float missionP = 20f;  // Jak mocno gonić ducha
-        float missionD = 2f;  // Tłumienie, żeby nie przestrzelił
-        
-        Vector3 currentVel = totalMovement / dt;
-        Vector3 missionSpring = (missionError * missionP) - (currentVel * missionD);
-        totalSpringForce += missionSpring;
-
-        foreach (var c in connections)
-        {
-            if (c.target == null) continue;
-            if (isAnchor && !c.target.isAnchor) continue;
-            if (!pidStorage.TryGetValue(c.target, out PidState state)) state = new PidState();
-
-            Vector3 directionToTarget = (c.target.transform.position - transform.position).normalized;
-
-            // --- SMITH PREDICTOR Z ESTYMACJĄ PRĘDKOŚCI ---
-            
-            // 1. Aktualizacja modelu o NASZ ruch
-            float myMovementTowardsTarget = Vector3.Dot(state.lastAppliedForce, directionToTarget);
-            state.internalModelDist -= myMovementTowardsTarget;
-
-            // 2. Aktualizacja modelu o ruch SĄSIADA (przewidywany)
-            state.internalModelDist += state.neighborVelocity * dt;
-
-            // 3. Korekta modelu z UWB
-            if (transmissionNode.TryGetDistance(this, c.target, out var data))
-            {
-                if (state.lastUwbTimestamp > 0)
-                {
-                    float timeDelta = data.timestamp - state.lastUwbTimestamp;
-                    if (timeDelta > 0)
-                    {
-                        float distDelta = data.distance - state.lastUwbDistance;
-                        float rawVel = distDelta / timeDelta;
-                        state.neighborVelocity = Mathf.Lerp(state.neighborVelocity, rawVel, 0.2f);
-                    }
-                }
-                state.lastUwbDistance = data.distance;
-                state.lastUwbTimestamp = data.timestamp;
-
-                float age = Time.fixedTime - data.timestamp;
-                float expectedDist = state.internalModelDist + (state.neighborVelocity * age);
-                
-                // OBLICZENIE MODEL ERROR (poprawka)
-                float modelError = data.distance - expectedDist;
-
-                state.driftCorrection = Mathf.Lerp(state.driftCorrection, modelError, 0.15f);
-
-                if (!state.initialized)
-                {
-                    state.internalModelDist = data.distance;
-                    state.initialized = true;
-                }
-            }
-
-            // 4. Obliczamy "odlagowany" dystans
-            float estimatedDist = state.internalModelDist + state.driftCorrection;
-            float error = estimatedDist - c.desiredDistance;
-
-            // --- DODANIE DEADZONE ---
-            // Jeśli błąd jest mniejszy niż np. 1cm (0.01), ignorujemy go, aby uniknąć drgań
-            if (Mathf.Abs(error) < droneSettings.maxDistanceErrorInCentimeters * 0.06f) 
-            {
-                error = 0f;
-            }
-
-            // --- PID ---
-            float pTerm = error * droneSettings.P;
-
-            // Całka (I) nie będzie rosła wewnątrz Deadzone, co zapobiega "pływaniu" drona
-            state.integral += error * dt;
-            float iTerm = state.integral * droneSettings.I;
-
-            // D obliczamy przed wyzerowaniem błędu, żeby zachować tłumienie (Damping)
-            float currentVelocity = (estimatedDist - state.lastError) / dt;
-
-            // Jeśli prędkość jest minimalna (szum), wyzeruj ją dla członu D
-            if (Mathf.Abs(currentVelocity) < droneSettings.minDThreshold) 
-            {
-                currentVelocity = 0f;
-            }
-
-            state.lastVelocity = Mathf.Lerp(state.lastVelocity, currentVelocity, droneSettings.derivativeSmoothing);
-            float dTerm = state.lastVelocity * droneSettings.D;
-
-            state.lastError = estimatedDist;
-            
-            float pidOutput = pTerm + iTerm + dTerm;
-            
-            // Jeśli error jest zero, a prędkość drona jest minimalna, możemy wygasić siłę całkowicie
-            if (error == 0f && currentVelocity < droneSettings.minVelocity)
-            {
-                pidOutput = 0f;
-            }
-
-            Vector3 force = directionToTarget * (pidOutput * dt);
-
-            state.lastAppliedForce = force; 
-            pidStorage[c.target] = state;
-            totalSpringForce += force;
-        }
-
-        return totalSpringForce;
-    }
-
-    void UpdateDrift()
-    {
-        // Co klatkę żyroskop "pływa" o mały ułamek stopnia
-        currentGyroDrift.x += Random.Range(-droneSettings.driftSpeed, droneSettings.driftSpeed);
-        currentGyroDrift.y += Random.Range(-droneSettings.driftSpeed, droneSettings.driftSpeed);
-        currentGyroDrift.z += Random.Range(-droneSettings.driftSpeed, droneSettings.driftSpeed);
-    }
-    
-    public Vector3 StripYAxis(Vector3 force)
-    {
-        return new Vector3(force.x, 0f, force.z);
-    }
-
+    /// <summary>Dodaje polaczenie do sasiada z zadanym dystansem (uzywane przy budowie trio/sieci).</summary>
     public void AddConnection(DroneAI other, float distance)
     {
         connections.Add(new Connection { target = other, desiredDistance = distance });
     }
 
-    void DrawConnections()
-    {
-        foreach (var c in connections)
-        {
-            if (c.target == null) continue;
-            float dist = Vector3.Distance(transform.position, c.target.transform.position);
-            float error = Mathf.Abs(dist - c.desiredDistance);
-            Color col = Color.Lerp(Color.cyan, Color.red, error / (c.desiredDistance * 0.5f));
-            Debug.DrawLine(transform.position, c.target.transform.position, col);
-        }
+    /// <summary>Zerowanie osi Y wektora (uzywane przez stare API). Zostawione dla zgodnosci.</summary>
+    public Vector3 StripYAxis(Vector3 v) => new Vector3(v.x, 0f, v.z);
 
-        if (debugEnabled)
-        {
-            // Rysuje pionową linię "anteny" nad dronem, żebyś widział go z daleka
-            Debug.DrawLine(transform.position, transform.position + Vector3.up * 2f, Color.cyan);
-            // Mały krzyżyk na ziemi
-            Debug.DrawRay(transform.position + Vector3.left * 0.5f, Vector3.right, Color.cyan);
-            Debug.DrawRay(transform.position + Vector3.back * 0.5f, Vector3.forward, Color.cyan);
-        }
-    }
+    // ----- Debug helpers (wywolywane przez Simulation) -----------------------------
 
     public void DebugPosition(int droneIndex)
     {
         float timeMs = Time.fixedTime * 1000f;
-        Vector3 pos = transform.position;
-
+        Vector3 p = transform.position;
         Debug.Log($"[<color=yellow>{timeMs:F0} ms</color>] Drone <color=cyan>#{droneIndex}</color> | " +
-                $"Pos: (<b>{pos.x:F2}</b>, <b>{pos.y:F2}</b>, <b>{pos.z:F2}</b>)");
+                  $"Pos: (<b>{p.x:F2}</b>, <b>{p.y:F2}</b>, <b>{p.z:F2}</b>)");
     }
 
     public void DebugForces(int droneIndex)
     {
         float timeMs = Time.fixedTime * 1000f;
+        float moveMag = lastFrameDisplacement.magnitude / Mathf.Max(Time.fixedDeltaTime, 1e-5f);
 
-        // Obliczamy magnitudo (siłę wypadkową), żeby log był czytelny
-        float mMag = missionForce.magnitude;
-        float sMag = springForce.magnitude;
-        float tMag = totalMovement.magnitude;
-
-        // Kolorowanie siły PID: jeśli jest bardzo duża, wyświetl na czerwono (ostrzeżenie przed oscylacjami)
-        string springColor = sMag > (droneSettings.horizontalSpeed * 0.5f) ? "#FF4444" : "#44FF44";
-
-        if (droneSettings != null && droneSettings.swarm.movementMode == DroneMovementMode.VffOrca)
+        if (droneSettings != null && droneSettings.movementMode == DroneMovementMode.VffOrca)
         {
-            Debug.Log($"[<color=yellow>{timeMs:F0} ms</color>] <color=cyan>Drone #{droneIndex} VFF/ORCA:</color>\n" +
-                    $"<color=green>VFF pref:</color> <b>{vffPreferredVelocity.magnitude:F3}</b> | " +
-                    $"<color=yellow>ORCA safe:</color> <b>{vffSafeVelocity.magnitude:F3}</b> | " +
-                    $"<color=orange>Move:</color> <b>{tMag:F3}</b>");
+            Debug.Log($"[<color=yellow>{timeMs:F0} ms</color>] <color=cyan>Drone #{droneIndex} VFF/ORCA:</color> " +
+                      $"<color=green>pref:</color> <b>{swarmSteering.PreferredVelocity.magnitude:F3}</b> | " +
+                      $"<color=yellow>safe:</color> <b>{swarmSteering.SafeVelocity.magnitude:F3}</b> | " +
+                      $"<color=orange>v:</color> <b>{moveMag:F3}</b>");
             return;
         }
 
-        Debug.Log($"[<color=yellow>{timeMs:F0} ms</color>] <color=cyan>Drone #{droneIndex} Forces:</color>\n" +
-                $"<color=green>Mission:</color> <b>{mMag:F3}</b> | " +
-                $"<color={springColor}>PID/Spring:</color> <b>{sMag:F3}</b> | " +
-                $"<color=orange>Actual Move:</color> <b>{tMag:F3}</b>");
+        Debug.Log($"[<color=yellow>{timeMs:F0} ms</color>] <color=cyan>Drone #{droneIndex} PID:</color> " +
+                  $"<color=green>step:</color> <b>{lastDebugSpringStep.magnitude:F3}</b> | " +
+                  $"<color=orange>v:</color> <b>{moveMag:F3}</b> | " +
+                  $"<color=#888888>tracked:</color> {formationPid.TrackedNeighbors}");
     }
 
+    // ----- Rysowanie ---------------------------------------------------------------
+
+    void DrawConnections()
+    {
+        for (int i = 0; i < connections.Count; i++)
+        {
+            Connection c = connections[i];
+            if (c.target == null) continue;
+            float dist = Vector3.Distance(transform.position, c.target.transform.position);
+            float relErr = Mathf.Abs(dist - c.desiredDistance) / Mathf.Max(c.desiredDistance * 0.5f, 0.01f);
+            Color col = Color.Lerp(Color.cyan, Color.red, Mathf.Clamp01(relErr));
+            Debug.DrawLine(transform.position, c.target.transform.position, col);
+        }
+
+        if (debugEnabled)
+        {
+            Debug.DrawLine(transform.position, transform.position + Vector3.up * 2f, Color.cyan);
+            Debug.DrawRay(transform.position + Vector3.left * 0.5f, Vector3.right, Color.cyan);
+            Debug.DrawRay(transform.position + Vector3.back * 0.5f, Vector3.forward, Color.cyan);
+        }
+    }
+
+    void DrawSteeringDebug(Vector3 prevPos)
+    {
+        if (droneSettings == null || !droneSettings.swarm.drawSteeringVectors) return;
+
+        Vector3 p = transform.position;
+        Debug.DrawRay(p, swarmSteering.PreferredVelocity, Color.green, Time.fixedDeltaTime);
+        Debug.DrawRay(p, swarmSteering.SafeVelocity, Color.yellow, Time.fixedDeltaTime);
+        Debug.DrawLine(prevPos, p, Color.cyan, Time.fixedDeltaTime);
+    }
 }
