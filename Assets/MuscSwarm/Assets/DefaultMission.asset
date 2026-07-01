@@ -13,11 +13,18 @@ MonoBehaviour:
   m_Name: DefaultMission
   m_EditorClassIdentifier: 
   targets:
-  - target: {x: 100, y: 20, z: 0}
-    timeStamp: 3
-  - target: {x: 0, y: -20, z: 100}
-    timeStamp: 3
-  - target: {x: -100, y: 50, z: 0}
-    timeStamp: 3
-  - target: {x: 0, y: -50, z: -100}
-    timeStamp: 3
+  - target: {x: 10, y: 20, z: 0}
+    timeStamp: 10
+  - target: {x: 0, y: -20, z: 10}
+    timeStamp: 10
+  - target: {x: -10, y: 5, z: 0}
+    timeStamp: 10
+  - target: {x: 0, y: -5, z: -10}
+    timeStamp: 10
+  - target: {x: 15, y: 20, z: -10}
+    timeStamp: 10
+  - target: {x: 15, y: 0, z: -10}
+    timeStamp: 10
+  - target: {x: -30, y: -20, z: 20}
+    timeStamp: 10
+  referenceTuning: {fileID: 11400000, guid: a1b2c3d4e5f607182939a4b5c6d7e8f0, type: 2}

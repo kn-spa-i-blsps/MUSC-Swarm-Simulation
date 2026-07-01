@@ -12,10 +12,10 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 240a7a0048ea41fb5aedf71cb3797cbf, type: 3}
   m_Name: DefaultDroneTuning
   m_EditorClassIdentifier: 
-  horizontalSpeed: 3
-  verticalSpeed: 3
-  yawSpeed: 100
-  movementMode: 0
+  horizontalSpeed: 3.98
+  verticalSpeed: 4.27
+  yawSpeed: 102
+  movementMode: 1
   pidP: 50
   pidI: 0.05
   pidD: 5
@@ -25,8 +25,9 @@ MonoBehaviour:
   settleVelocity: 0.1
   missionP: 20
   missionD: 2
-  velocityRetention: 0.05
-  uwbIntervalMs: 200
+  velocityRetention: 0.058
+  uwbIntervalMs: 500
+  uwbTransmissionDelayMs: 200
   uwbNoiseAmplitude: 0.1
   obstacleAvoidanceStrength: 30
   obstacleSensingMultiplier: 1.6
@@ -41,5 +42,8 @@ MonoBehaviour:
     agentRadius: 0.6
     orcaNeighborRadius: 6
     orcaTimeHorizon: 1.5
+    connectionWeight: 6
+    connectionDamping: 2.5
+    useUwbNeighborSensing: 1
     drawSteeringVectors: 0
-  mission: {fileID: 11400000, guid: b2c3d4e5f607182939a4b5c6d7e8f012, type: 2}
+  mission: {fileID: 11400000, guid: aaaa1111bbbb2222cccc3333dddd4448, type: 2}

@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using MuscSwarm;
 using UnityEngine;
 
 /// <summary>
@@ -84,9 +85,14 @@ public static class Orca2D
     /// <summary>
     /// Wypelnia <paramref name="buffer"/> stanami sasiadow do solver'a (rzut na XZ).
     /// </summary>
+    /// <param name="neighbors">
+    /// Kandydaci na sasiadow (juz z rozwiazana pozycja/predkoscia - ground truth albo UWB,
+    /// patrz <see cref="SwarmSteeringSettings.useUwbNeighborSensing"/>). Filtrowanie po
+    /// <paramref name="neighborRadius"/> dzieje sie tutaj, na bazie tej rozwiazanej pozycji.
+    /// </param>
     public static void FillAgentStates(
         DroneAI self,
-        IReadOnlyList<DroneAI> neighbors,
+        IReadOnlyList<NeighborSample> neighbors,
         float neighborRadius,
         List<AgentState> buffer)
     {
@@ -96,18 +102,17 @@ public static class Orca2D
 
         for (int i = 0; i < neighbors.Count; i++)
         {
-            DroneAI n = neighbors[i];
-            if (n == null || n == self) continue;
+            NeighborSample n = neighbors[i];
+            if (n.drone == null || n.drone == self) continue;
 
-            Vector3 np = n.transform.position;
+            Vector3 np = n.position;
             if (Vector3.SqrMagnitude(np - p) > r2) continue;
 
-            Vector3 nv = n.SimulatedVelocity;
             buffer.Add(new AgentState
             {
                 position = new Vector2(np.x, np.z),
-                velocity = new Vector2(nv.x, nv.z),
-                radius = n.droneSettings != null ? n.droneSettings.swarm.agentRadius : 0.6f,
+                velocity = new Vector2(n.velocity.x, n.velocity.z),
+                radius = n.drone.droneSettings != null ? n.drone.droneSettings.swarm.agentRadius : 0.6f,
             });
         }
     }

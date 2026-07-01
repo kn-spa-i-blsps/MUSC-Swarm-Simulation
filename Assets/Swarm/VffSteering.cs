@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using MuscSwarm;
 using UnityEngine;
 
 /// <summary>
@@ -11,9 +12,14 @@ public static class VffSteering
     /// <summary>
     /// Liczy preferowana predkosc drona w plaszczyznie XZ.
     /// </summary>
+    /// <param name="neighbors">
+    /// Kandydaci na sasiadow (juz z rozwiazana pozycja/predkoscia - ground truth albo UWB,
+    /// patrz <see cref="SwarmSteeringSettings.useUwbNeighborSensing"/>). Filtrowanie po
+    /// perceptionRadius/separationRadius dzieje sie tutaj, na bazie tej rozwiazanej pozycji.
+    /// </param>
     public static Vector3 ComputePreferredVelocity(
         DroneAI self,
-        IReadOnlyList<DroneAI> neighbors,
+        IReadOnlyList<NeighborSample> neighbors,
         Vector3 goalPosition,
         SwarmSteeringSettings s,
         float maxSpeed)
@@ -26,21 +32,26 @@ public static class VffSteering
         Vector3 cohesionSum = Vector3.zero;
         int crowdCount = 0;
 
+        float perceptionR2 = s.perceptionRadius * s.perceptionRadius;
+
         for (int i = 0; i < neighbors.Count; i++)
         {
-            DroneAI n = neighbors[i];
-            if (n == null) continue;
+            NeighborSample n = neighbors[i];
+            if (n.drone == null || n.drone == self) continue;
 
-            Vector3 toNeighbor = n.transform.position - pos;
-            float dist = toNeighbor.magnitude;
+            Vector3 toNeighbor = n.position - pos;
+            float distSq = toNeighbor.sqrMagnitude;
+            if (distSq > perceptionR2) continue;
+
+            float dist = Mathf.Sqrt(distSq);
             if (dist < 0.001f) continue;
 
             // Separation: silne odpychanie skalowane 1/dist (im blizej, tym mocniej).
             if (dist < s.separationRadius)
                 separation -= toNeighbor.normalized / dist;
 
-            alignmentSum += n.SimulatedVelocity;
-            cohesionSum += n.transform.position;
+            alignmentSum += n.velocity;
+            cohesionSum += n.position;
             crowdCount++;
         }
 

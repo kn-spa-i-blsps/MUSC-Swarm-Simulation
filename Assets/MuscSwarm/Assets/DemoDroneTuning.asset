@@ -12,8 +12,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 240a7a0048ea41fb5aedf71cb3797cbf, type: 3}
   m_Name: DemoDroneTuning
   m_EditorClassIdentifier: 
-  horizontalSpeed: 20
-  verticalSpeed: 15
+  horizontalSpeed: 10
+  verticalSpeed: 10
   yawSpeed: 100
   movementMode: 1
   pidP: 50
@@ -27,6 +27,7 @@ MonoBehaviour:
   missionD: 2
   velocityRetention: 0.05
   uwbIntervalMs: 200
+  uwbTransmissionDelayMs: 200
   uwbNoiseAmplitude: 0.1
   obstacleAvoidanceStrength: 30
   obstacleSensingMultiplier: 1.6
@@ -41,5 +42,8 @@ MonoBehaviour:
     agentRadius: 0.6
     orcaNeighborRadius: 6
     orcaTimeHorizon: 1.5
+    connectionWeight: 5
+    connectionDamping: 2
+    useUwbNeighborSensing: 1
     drawSteeringVectors: 0
   mission: {fileID: 0}

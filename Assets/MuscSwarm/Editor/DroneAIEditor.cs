@@ -35,14 +35,21 @@ namespace MuscSwarm.EditorTools
                 if (ai.droneSettings != null)
                 {
                     EditorGUILayout.LabelField("Mode", ai.droneSettings.movementMode.ToString());
-                    EditorGUILayout.LabelField("UWB interval", $"{ai.droneSettings.uwbIntervalMs} ms");
+                    EditorGUILayout.LabelField("UWB sample interval", $"{ai.droneSettings.uwbIntervalMs} ms");
+                    EditorGUILayout.LabelField("UWB transmission delay", $"{ai.droneSettings.uwbTransmissionDelayMs} ms");
+                    EditorGUILayout.LabelField("Total worst-case lag", $"{ai.droneSettings.uwbIntervalMs + ai.droneSettings.uwbTransmissionDelayMs} ms");
                 }
 
                 EditorGUILayout.IntField("Connections", ai.connections.Count);
                 EditorGUILayout.Toggle("Is anchor", ai.isAnchor);
 
                 if (ai.transmissionNode != null)
-                    EditorGUILayout.LabelField("Network pairs", ai.transmissionNode.TrackedPairs.ToString());
+                {
+                    EditorGUILayout.LabelField("Network pairs (delivered)", ai.transmissionNode.TrackedPairs.ToString());
+                    EditorGUILayout.LabelField("Measurements in flight", ai.transmissionNode.InFlightCount.ToString());
+                    EditorGUILayout.LabelField("Drone poses known (broadcast)", ai.transmissionNode.TrackedPoses.ToString());
+                    EditorGUILayout.LabelField("Poses in flight", ai.transmissionNode.InFlightPoseCount.ToString());
+                }
             }
 
             // Force a repaint so the runtime panel keeps refreshing.

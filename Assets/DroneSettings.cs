@@ -76,8 +76,11 @@ public class DroneSettings : ScriptableObject
     // ----- UWB -----------------------------------------------------------------
 
     [Header("UWB")]
-    [Tooltip("Okres pomiarow UWB w ms. Wiekszy = wiekszy lag widziany przez Smith Predictor.")]
+    [Tooltip("Okres probkowania UWB w ms - jak czesto dron w ogole wykonuje nowy pomiar dystansu do sasiadow.")]
     [Range(10, 500)] public int uwbIntervalMs = 200;
+
+    [Tooltip("PRAWDZIWY lag transmisji radiowej w ms: czas jaki uplywa od wykonania pomiaru przez nadawce do momentu gdy odbiorca moze go odczytac. Domyslnie 200ms. To jest niezalezne od interwalu probkowania - obie wartosci sie sumuja.")]
+    [Range(0, 1000)] public int uwbTransmissionDelayMs = 200;
 
     [Tooltip("Szum pomiarowy UWB (+/- jednostki). 0.1u ~= 1.6 cm w skali 6u/m.")]
     [Range(0f, 0.5f)] public float uwbNoiseAmplitude = 0.1f;

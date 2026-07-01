@@ -52,6 +52,32 @@ public class SwarmSteeringSettings
     [Tooltip("Horyzont czasowy ORCA w sekundach. Wiekszy = wczesniejsze unikanie kolizji.")]
     [Range(0.1f, 5f)] public float orcaTimeHorizon = 1.5f;
 
+    // ----- FORMATION CONNECTIONS -------------------------------------------------
+
+    [Header("Formation connections (kotwice trio + polaczenia miedzy-trio)")]
+    [Tooltip("Sila P (proporcjonalna, jedn/s na jednostke bledu dystansu) sprezyny utrzymujacej zadane dystanse " +
+             "z listy Connections (te same polaczenia co w PidSpring: trojkat trio + zadane dystanse miedzy " +
+             "kotwicami roznych trio). Dziala NIEZALEZNIE od Perception Radius - polaczenie jest trzymane nawet " +
+             "jesli sasiad jest daleko poza zasiegiem VFF.\n" +
+             "0 = wylacz (formacja emerguje tylko z Cohesion/Separation, moze 'rozjezdzac' sie na duzych dystansach).\n" +
+             "Wysoka wartosc = priorytet nad Goal Weight (dron wolniej realizuje misje, mocniej trzyma formacje). " +
+             "UWAGA: bez odpowiedniego Connection Damping wysoka wartosc oscyluje (przestrzela).")]
+    [Range(0f, 20f)] public float connectionWeight = 6f;
+
+    [Tooltip("Sila D (tlumienie) sprezyny polaczenia - redukuje predkosc zbliżania/oddalania sie od sasiada, " +
+             "zapobiega przestrzelaniu i oscylacji przy wysokim Connection Weight. Startuj od ~1/3 Connection Weight.")]
+    [Range(0f, 10f)] public float connectionDamping = 2f;
+
+    // ----- NEIGHBOR SENSING -----------------------------------------------------
+
+    [Header("Neighbor sensing (realizm)")]
+    [Tooltip("WLACZONE: pozycje/predkosci sasiadow pochodza z symulowanego UWB radiobroadcastu " +
+             "(ten sam szum i lag transmisji co w PidSpring - patrz sekcja UWB). Realistyczne, ale " +
+             "steering moze byc 'szarpany' przy duzym lagu/szumie.\n" +
+             "WYLACZONE: idealna znajomosc pozycji sasiadow (ground truth) - czysty test algorytmu steeringu, " +
+             "odcietego od warstwy sensorycznej.")]
+    public bool useUwbNeighborSensing = true;
+
     // ----- DEBUG ---------------------------------------------------------------
 
     [Header("Debug")]

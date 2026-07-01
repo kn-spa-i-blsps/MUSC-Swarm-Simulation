@@ -154,7 +154,8 @@ public class DroneAI : MonoBehaviour
             this,
             missionGhost.Position,
             simulatedVelocity,
-            droneSettings);
+            droneSettings,
+            transmissionNode);
 
         // ORCA/VFF dzialaja w plaszczyznie XZ - Y musimy dolozyc niezaleznie.
         // Prosta proporcjonalna kontrola wysokosci: dazymy do Y ducha celu.
