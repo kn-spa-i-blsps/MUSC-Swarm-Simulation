@@ -84,9 +84,7 @@ namespace MuscSwarm
                 DroneAI target = conn.target;
                 if (target == null) continue;
 
-                // Kotwica nie sluga - kotwice ignoruja niesasiadow ktorzy nie sa kotwicami.
-                // (Zachowane zachowanie z oryginalu.)
-                if (self.isAnchor && !target.isAnchor) continue;
+                if (conn.weight <= 0f) continue;
 
                 Vector3 toTarget = target.transform.position - selfPos;
                 float realDist = toTarget.magnitude;
@@ -169,7 +167,7 @@ namespace MuscSwarm
                 if (error == 0f && Mathf.Abs(rawDeriv) < tuning.settleVelocity)
                     pidOutput = 0f;
 
-                Vector3 contribution = dir * (pidOutput * dt);
+                Vector3 contribution = dir * (pidOutput * dt * conn.weight);
                 total += contribution;
 
                 states[target] = state;

@@ -736,7 +736,17 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: fbdf938a426971b8c926aa1942d9aac9, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::DroneAI
+  isAnchor: 0
   connections: []
+  P: 50
+  I: 0.05
+  D: 5
+  derivativeSmoothing: 0.2
+  moveSpeed: 1
+  drag: 0.95
+  latencyFrames: 5
+  pidSubSteps: 20
+  externalForce: {x: 0, y: 0, z: 0}
 --- !u!54 &4982275758398235111
 Rigidbody:
   m_ObjectHideFlags: 0

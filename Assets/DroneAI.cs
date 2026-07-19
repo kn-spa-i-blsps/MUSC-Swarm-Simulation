@@ -189,7 +189,12 @@ public class DroneAI : MonoBehaviour
     /// <summary>Dodaje polaczenie do sasiada z zadanym dystansem (uzywane przy budowie trio/sieci).</summary>
     public void AddConnection(DroneAI other, float distance)
     {
-        connections.Add(new Connection { target = other, desiredDistance = distance });
+        connections.Add(new Connection
+        {
+            target = other,
+            desiredDistance = distance,
+            weight = Connection.DefaultWeight(this, other),
+        });
     }
 
     /// <summary>Zerowanie osi Y wektora (uzywane przez stare API). Zostawione dla zgodnosci.</summary>

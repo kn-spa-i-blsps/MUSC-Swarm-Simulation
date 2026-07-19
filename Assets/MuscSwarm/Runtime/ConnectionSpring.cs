@@ -42,9 +42,7 @@ namespace MuscSwarm
                 DroneAI target = conn.target;
                 if (target == null) continue;
 
-                // Kotwica nie sluga - kotwice ignoruja niesasiadow ktorzy nie sa kotwicami.
-                // (Ta sama konwencja co w FormationPid - unika podwojnego liczenia tej samej pary.)
-                if (self.isAnchor && !target.isAnchor) continue;
+                if (conn.weight <= 0f) continue;
 
                 Vector3 toTarget = target.transform.position - selfPos;
                 float realDist = toTarget.magnitude;
@@ -63,8 +61,8 @@ namespace MuscSwarm
                 // D: predkosc "rozjezdzania sie" wzdluz osi polaczenia (dodatnia = oddalaja sie).
                 float closingSpeed = Vector3.Dot(target.SimulatedVelocity - selfVel, dir);
 
-                float pTerm = error * s.connectionWeight;
-                float dTerm = closingSpeed * s.connectionDamping;
+                float pTerm = error * s.connectionWeight * conn.weight;
+                float dTerm = closingSpeed * s.connectionDamping * conn.weight;
 
                 correction += dir * (pTerm + dTerm);
             }
