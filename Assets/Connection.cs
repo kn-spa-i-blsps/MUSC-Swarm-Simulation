@@ -1,8 +1,8 @@
 using UnityEngine;
 
 /// <summary>
-/// Polaczenie miedzy dwoma dronami uzywane przez regulator PID.
-/// Zadana odleglosc bedzie utrzymywana przez Smith Predictor + PID.
+/// Directed formation edge. <see cref="weight"/> scales PID / ConnectionSpring on this
+/// owner only (asymmetric). Defaults: mother→child 0, everything else 1.
 /// </summary>
 [System.Serializable]
 public class Connection
@@ -16,7 +16,10 @@ public class Connection
     [Tooltip("Waga [0..1]: jak bardzo wlasciciel polaczenia dba o utrzymanie dystansu.")]
     [Range(0f, 1f)] public float weight = 1f;
 
-    /// <summary>Domyslna waga owner -> target przy tworzeniu polaczenia.</summary>
+    /// <summary>
+    /// Default owner→target weight when an edge is created.
+    /// Mother→child is 0 so the mother does not fight the triangle; children hold it.
+    /// </summary>
     /// <remarks>
     /// Matka-matka: 1. Matka-dziecko w trojce: 0. Dziecko-matka w trojce: 1.
     /// </remarks>

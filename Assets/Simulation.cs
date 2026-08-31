@@ -1,9 +1,10 @@
-// [INFO] Skala: w przeliczeniu na rozmiar drona 3,5" jeden realny metr to ~6 jednostek Unity.
+// Scale: 3.5" drone → ~6 Unity units = 1 real metre.
+
 using System.Collections.Generic;
 using UnityEngine;
 
 /// <summary>
-/// Polaczenie miedzy dwoma trio (indeksy 1-based) z zadanym dystansem miedzy kotwicami.
+/// 1-based indices into <see cref="Simulation.spawnPositions"/>; <c>d</c> is mother↔mother rest length.
 /// </summary>
 [System.Serializable]
 public struct ConnectionData
@@ -27,8 +28,9 @@ public struct SpawnPoint
 }
 
 /// <summary>
-/// Manager symulacji roju: spawnuje trio na bazie listy <see cref="spawnPositions"/>,
-/// laczy je wedlug <see cref="connections"/>, wstrzykuje DroneSettings i sklada kamery.
+/// Scene bootstrap: spawn trios from <see cref="spawnPositions"/>, wire mothers via
+/// <see cref="connections"/>, inject the shared <see cref="DroneSettings"/> asset, register cameras.
+/// Does not steer — <see cref="DroneAI"/> does.
 /// </summary>
 [RequireComponent(typeof(CameraSwitcher))]
 public class Simulation : MonoBehaviour
