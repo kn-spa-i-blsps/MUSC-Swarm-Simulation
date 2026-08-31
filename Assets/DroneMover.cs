@@ -1,6 +1,11 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
 
+/// <summary>
+/// Manual WASD takeover. When <see cref="isActive"/> (set by <see cref="CameraSwitcher"/>),
+/// this disables <see cref="DroneAI"/> so PID springs do not fight the keyboard.
+/// Soft overlap push in <see cref="ResolveCollisions"/> always runs, including during AI flight.
+/// </summary>
 public class DroneMover : MonoBehaviour
 {
     public float moveSpeed = 5f;
@@ -20,14 +25,12 @@ public class DroneMover : MonoBehaviour
     {
         if (isActive)
         {
-            // 🔹 WYŁĄCZ AI
             if (ai != null) ai.enabled = false;
 
             HandleInput();
         }
         else
         {
-            // 🔹 WŁĄCZ AI
             if (ai != null) ai.enabled = true;
         }
 
@@ -46,7 +49,6 @@ public class DroneMover : MonoBehaviour
 
         Debug.Log($"COLLISION: {selfName} <-> {otherName}");
 
-        // 🔥 wizualizacja miejsca kolizji
         Vector3 pointA = transform.position;
         Vector3 pointB = other.transform.position;
         Vector3 mid = (pointA + pointB) * 0.5f;
@@ -104,7 +106,6 @@ public class DroneMover : MonoBehaviour
 
             if (dist < 0.0001f) continue;
 
-            // ile "w środku" jesteś
             float overlap = radius - dist;
 
             if (overlap > 0f)
@@ -113,7 +114,6 @@ public class DroneMover : MonoBehaviour
             }
         }
 
-        // 🔥 miękkie odpychanie w czasie
         transform.position += push * strength * Time.deltaTime;
     }
 }

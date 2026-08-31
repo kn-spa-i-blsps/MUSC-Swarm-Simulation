@@ -2,6 +2,11 @@ using UnityEngine;
 using UnityEngine.InputSystem;
 using System.Collections.Generic;
 
+/// <summary>
+/// Cycles the active follow-camera with C. The matching <see cref="DroneMover"/>
+/// becomes the only manually flown drone; every other listed drone stays on AI.
+/// <see cref="Simulation.SetupCameras"/> fills both lists with trio anchors only.
+/// </summary>
 public class CameraSwitcher : MonoBehaviour
 {
     public List<Camera> cameras = new List<Camera>();
@@ -40,10 +45,8 @@ public class CameraSwitcher : MonoBehaviour
     {
         for (int i = 0; i < cameras.Count; i++)
         {
-            // 🔹 kamera
             cameras[i].enabled = (i == index);
 
-            // 🔹 dron (sterowanie)
             if (i < drones.Count && drones[i] != null)
             {
                 drones[i].isActive = (i == index);

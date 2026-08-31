@@ -1,8 +1,23 @@
 using UnityEngine;
 using System.Collections.Generic;
 
+/// <summary>
+/// Per-drone formation controller on branch <c>main</c>.
+/// Each edge in <see cref="connections"/> is a 1D spring on UWB range: the drone
+/// samples true range+bearing, delays them by <see cref="latencyFrames"/>, then
+/// runs a cubic-P PID plus dead-reckoning inside <see cref="pidSubSteps"/> physics
+/// substeps. Motion is locked to the XZ plane.
+/// </summary>
+/// <remarks>
+/// Later branches replace this file with a thin orchestrator (MissionGhost, UwbSampler,
+/// FormationPid / VFF+ORCA). Do not mix those types into this class.
+/// </remarks>
 public class DroneAI : MonoBehaviour
 {
+    /// <summary>
+    /// One directed spring to a neighbour. PID state and the UWB delay queues live here
+    /// because each edge has its own error history.
+    /// </summary>
     [System.Serializable]
     public class Connection
     {
@@ -12,10 +27,14 @@ public class DroneAI : MonoBehaviour
         public float integral = 0f;
         public float smoothedDerivative = 0f;
         public bool initialized = false;
+        // FIFO of (range error, unit bearing) sampled in FixedUpdate. Control peeks the
+        // oldest pair once Count > latencyFrames — that is the entire radio-delay model.
         public Queue<float> errorBuffer = new Queue<float>();
         public Queue<Vector3> directionBuffer = new Queue<Vector3>();
     }
 
+    // Trio drone "a". A mother with zero edges to other anchors returns before PID
+    // (frozen datum). That is independent of whether inter-trio edges actually apply force.
     public bool isAnchor = false;
     public List<Connection> connections = new List<Connection>();
 
@@ -32,7 +51,9 @@ public class DroneAI : MonoBehaviour
     public int latencyFrames = 5;
 
     [Header("Super Legit - SubStepping")]
-    public int pidSubSteps = 20; // Ile razy szybciej ma działać PID niż reszta symulacji
+    // PID integrates this many times per FixedUpdate so the controller can run "faster"
+    // than the physics tick while still using only delayed UWB samples.
+    public int pidSubSteps = 20;
 
     [HideInInspector] public Vector3 externalForce;
     private Vector3 velocity = Vector3.zero;
@@ -45,28 +66,28 @@ public class DroneAI : MonoBehaviour
     void FixedUpdate()
     {
         DrawConnections();
+        // If this mother has no other-anchor neighbours, do not integrate: children still
+        // spring toward her, she stays the origin of the triangle. ConnectTrios adds
+        // mother–mother edges for the 5-trio layout, which *disables* this freeze even
+        // though those edges are not sampled below.
         if (isAnchor && connections.FindAll(c => c.target.isAnchor).Count == 0) return;
         if (connections.Count == 0) return;
 
-        // --- 1. LOGIKA SENSORA (RADIO UWB) ---
+        // --- 1. Sensor (ideal UWB): enqueue ground-truth range error and bearing.
+        // Control in section 2 never reads live positions — only these delayed queues.
+        // Opposite of later branches: here mother↔mother is skipped (no inter-trio PID).
+        // Mother still samples her own children; children sample everyone they are wired to.
         foreach (var c in connections)
         {
             if (c.target == null) continue;
             if (c.target.isAnchor && isAnchor) continue;
 
-            // Prawdziwy wektor do sąsiada (to, co widzi świat, ale nie dron)
             Vector3 realVec = c.target.transform.position - transform.position;
             
-            // Dron zapamiętuje DYSTANS i KIERUNEK w momencie próbkowania
-            // W prawdziwym UWB kierunek brałoby się z fazy sygnału lub kilku anten (AoA)
             float realDist = realVec.magnitude;
             Vector3 directionAtSample = realVec.normalized;
 
-            // Pakujemy to do bufora - dron dowie się o tym dopiero po latencyFrames
             c.errorBuffer.Enqueue(realDist - c.desiredDistance);
-            
-            // DODAJEMY: Bufor kierunku, żeby dron nie wiedział "na żywo" w którą stronę pchać
-            // (Wymaga dodania Queue<Vector3> directionBuffer w klasie Connection)
             c.directionBuffer.Enqueue(directionAtSample);
 
             if (c.errorBuffer.Count > latencyFrames + 1) {
@@ -75,7 +96,9 @@ public class DroneAI : MonoBehaviour
             }
         }
 
-        // --- 2. SUB-STEPPING PID (100% Blind Dead Reckoning) ---
+        // --- 2. Blind sub-step PID: same delayed sample for every inner step.
+        // Dead reckoning subtracts own motion along the *old* bearing so the error
+        // does not stay frozen for latencyFrames.
         float subStepDeltaTime = Time.fixedDeltaTime / pidSubSteps;
         
         for (int step = 0; step < pidSubSteps; step++)
@@ -86,14 +109,11 @@ public class DroneAI : MonoBehaviour
             {
                 if (c.target == null || c.errorBuffer.Count <= latencyFrames) continue;
 
-                // POBIERAMY DANE Z LAGIEM (Kierunek też jest stary!)
                 float delayedError = c.errorBuffer.Peek(); 
                 Vector3 delayedDir = c.directionBuffer.Peek(); 
 
-                // Prędkość zbliżania się (rzut naszej prędkości na STARY kierunek)
                 float closingSpeed = Vector3.Dot(velocity, delayedDir);
 
-                // Dead Reckoning: "Mój stary błąd minus to, co sam przeleciałem"
                 float legitPredictedError = delayedError - (closingSpeed * subStepDeltaTime * step);
 
                 if (!c.initialized) {
@@ -101,18 +121,16 @@ public class DroneAI : MonoBehaviour
                     c.initialized = true;
                 }
 
-                // PID
                 c.integral = Mathf.Clamp(c.integral + (legitPredictedError * subStepDeltaTime), -5f, 5f);
                 float rawDerivative = -closingSpeed; 
                 c.smoothedDerivative = Mathf.Lerp(c.smoothedDerivative, rawDerivative, derivativeSmoothing);
                 c.previousError = legitPredictedError;
 
-                // Siła P z potęgą (o którą pytałeś)
+                // |error|^3 * sign: small range errors barely push; large ones dominate.
                 float pFactor = Mathf.Pow(Mathf.Abs(legitPredictedError), 3f) * Mathf.Sign(legitPredictedError);
                 float pidOutput = (P * pFactor) + (I * c.integral) + (D * c.smoothedDerivative);
 
-                // REPUZJA (Też na bazie Dead Reckoning!)
-                // Jeśli dron "myśli", że jest blisko (na podstawie starego info + ruchu), to odbija
+                // Soft collision using the same predicted range (not Physics.OverlapSphere).
                 float estimatedDist = (delayedError + c.desiredDistance) - (closingSpeed * subStepDeltaTime * step);
                 if (estimatedDist < c.desiredDistance * 0.5f) {
                     float rep = Mathf.Pow(1f - (estimatedDist / (c.desiredDistance * 0.5f)), 2) * 400f;
@@ -122,7 +140,8 @@ public class DroneAI : MonoBehaviour
                 totalForce += delayedDir * pidOutput;
             }
 
-            // Fizyka (Blokada Y wewnątrz sub-stepu)
+            // Denominator is the full list, including mother↔mother edges that never
+            // contributed force — those extra edges dilute the child springs.
             Vector3 finalAcc = (totalForce / connections.Count) + externalForce;
             finalAcc.y = 0; 
             

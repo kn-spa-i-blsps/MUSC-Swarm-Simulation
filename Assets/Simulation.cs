@@ -1,9 +1,25 @@
 using UnityEngine;
 using System.Collections.Generic;
 
+/// <summary>
+/// Scene bootstrap for the MUSC swarm on branch <c>main</c>.
+/// Instantiates drone trios, wires the formation graph, pushes global PID/physics
+/// onto every <see cref="DroneAI"/>, and registers each trio's anchor with
+/// <see cref="CameraSwitcher"/>. Runtime motion lives in DroneAI / DroneMover — this
+/// class does not steer drones itself.
+/// </summary>
+/// <remarks>
+/// Scale used on later branches: ~6 Unity units = 1 real metre (3.5" drone).
+/// This file still treats distances as raw Unity units.
+/// </remarks>
 [RequireComponent(typeof(CameraSwitcher))]
 public class Simulation : MonoBehaviour
 {
+    /// <summary>
+    /// One rigid equilateral triangle of three drones. Drone <c>a</c> is the
+    /// formation anchor (only it is linked to other trios in <see cref="ConnectTrios"/>).
+    /// Internal edges are bidirectional springs of length <paramref name="d"/>.
+    /// </summary>
     [System.Serializable]
     public class DroneTrio
     {
@@ -15,6 +31,7 @@ public class Simulation : MonoBehaviour
             a.isAnchor = true;
 
             b = Create(prefab, offset + new Vector3(d, 0, 0), parent);
+            // 0.87 ≈ √3/2: third vertex of an equilateral triangle of side d on XZ.
             c = Create(prefab, offset + new Vector3(d / 2f, 0, 0.87f * d), parent);
 
             ConnectInside(a, b, d);
@@ -28,6 +45,7 @@ public class Simulation : MonoBehaviour
             return go.GetComponent<DroneAI>();
         }
 
+        // Formation springs are undirected: both drones must hold the same desiredDistance.
         void ConnectInside(DroneAI x, DroneAI y, float d)
         {
             x.AddConnection(y, d);
@@ -62,14 +80,14 @@ public class Simulation : MonoBehaviour
     public float windStrength = 5f;
     public float windScale = 0.1f; 
     public float windTimeSpeed = 0.5f; 
-    public float vibrationStrength = 0.2f; // Drgania silników
+    public float vibrationStrength = 0.2f; // high-frequency motor shake added to externalForce
 
     [Header("Latency Control")]
+    // Copied to DroneAI.latencyFrames: UWB sample delay in physics frames, not milliseconds.
     public float globalLatency = 5f;
 
     private CameraSwitcher cameraSwitcher;
 
-    // 🔹 TRIO SYSTEM (ręcznie kontrolowany)
     private List<DroneTrio> trios = new List<DroneTrio>();
 
     void Start()
@@ -79,6 +97,8 @@ public class Simulation : MonoBehaviour
         if(autoSpawnOn) AutoSpawnTrios();
         else SpawnTrios();
         SyncDroneSettings();
+        // Inter-trio edges are hardcoded for five trios (see ConnectTrios). Auto-spawn
+        // still calls this, so trioCount must stay 5 or the graph will throw / be wrong.
         ConnectTrios();
         SetupCameras();
     }
@@ -91,6 +111,7 @@ public class Simulation : MonoBehaviour
             SyncDroneSettings();
         }
 
+        // Wind / latency are live every frame; PID gains only refresh when updatePID is ticked.
         SyncPhysicsSettings();
     }
 
@@ -105,7 +126,7 @@ public class Simulation : MonoBehaviour
             new Vector2(6, -14),
         };
 
-        trios.Clear(); // tylko czyszczenie starej symulacji
+        trios.Clear();
 
         for (int i = 0; i < trioPositions.Length; i++)
         {
@@ -113,7 +134,7 @@ public class Simulation : MonoBehaviour
 
             DroneTrio t = new DroneTrio(dronePrefab, trioDistance, pos, transform);
 
-            trios.Add(t); // 🔥 TO ZOSTAJE
+            trios.Add(t);
         }
     }
 
@@ -153,18 +174,16 @@ public class Simulation : MonoBehaviour
             return;
         }
 
-        // Używamy pozycji XYZ do wygenerowania unikalnego wiatru dla tego drona
+        // Spatial Perlin so neighbouring drones share similar wind, not identical gusts.
         float x = drone.transform.position.x * windScale;
         float z = drone.transform.position.z * windScale;
         float t = Time.time * windTimeSpeed;
 
-        // Generujemy szum dla każdej osi oddzielnie
         float windX = (Mathf.PerlinNoise(x + t, z) - 0.5f) * 2f;
         float windZ = (Mathf.PerlinNoise(x, z + t) - 0.5f) * 2f;
         
         Vector3 windVector = new Vector3(windX, 0, windZ) * windStrength;
         
-        // Dodajemy turbulencje silnika (drgania wysokiej częstotliwości)
         Vector3 motorNoise = Random.insideUnitSphere * vibrationStrength;
 
         drone.externalForce = windVector + motorNoise;
@@ -172,7 +191,6 @@ public class Simulation : MonoBehaviour
 
     public void SyncDroneSettings()
     {
-        // Sprawdzamy czy lista nie jest pusta (np. przed startem symulacji)
         if (trios == null || trios.Count == 0) return;
 
         foreach (var trio in trios)
@@ -198,10 +216,14 @@ public class Simulation : MonoBehaviour
         d.latencyFrames = (int)globalLatency;
     }
 
+    /// <summary>
+    /// Wires mother↔mother edges for the five hardcoded spawn points in
+    /// <see cref="SpawnTrios"/>. Rest lengths 7 vs 9 are design values, not measured
+    /// spawn spacing. On this branch those edges do not produce PID force (see
+    /// <see cref="DroneAI"/>); they only affect the lone-anchor freeze check.
+    /// </summary>
     void ConnectTrios()
     {
-        // 🔹 ręczne połączenia między TRIO
-
         /*
         for (int i = 0; i < trios.Count - 1; i++)
         {
@@ -216,8 +238,6 @@ public class Simulation : MonoBehaviour
         ConnectAnchors(trios[2], trios[3], 7f);
         ConnectAnchors(trios[2], trios[4], 9f);
         ConnectAnchors(trios[3], trios[4], 9f);
-
-        // możesz dodawać dowolne grafy między trio
     }
 
     void ConnectAnchors(DroneTrio drt1, DroneTrio drt2, float d)
@@ -226,6 +246,7 @@ public class Simulation : MonoBehaviour
         drt2.a.AddConnection(drt1.a, d);
     }
 
+    // Only anchors get a follow-cam / manual takeover. Children stay on DroneAI.
     void SetupCameras()
     {
         CameraSwitcher cs = cameraSwitcher;
