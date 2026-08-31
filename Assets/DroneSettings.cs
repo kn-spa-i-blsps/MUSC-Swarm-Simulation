@@ -1,5 +1,9 @@
 using UnityEngine;
 
+/// <summary>
+/// Inline tuning blob (not a ScriptableObject on this branch). One instance lives on
+/// <see cref="Simulation"/> and is assigned onto every drone. Becomes an asset on vff+orca.
+/// </summary>
 [System.Serializable]
 public class DroneSettings
 {

@@ -1,6 +1,11 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
 
+/// <summary>
+/// Manual takeover. <see cref="CameraSwitcher"/> sets <see cref="isActive"/> on mothers only.
+/// While active, <see cref="DroneAI"/> is disabled. This branch still uses
+/// <c>Time.fixedDeltaTime / 2</c> inside <c>Update</c> — framerate-wrong; fixed on vff+orca.
+/// </summary>
 public class DroneMover : MonoBehaviour
 {
     public bool isActive = false;

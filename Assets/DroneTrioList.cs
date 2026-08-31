@@ -1,6 +1,10 @@
 using UnityEngine;
 using System.Collections.Generic;
 
+/// <summary>
+/// Spawns every trio from <see cref="SpawnPoint"/> then wires mother↔mother edges
+/// from <see cref="ConnectionData"/> (1-based indices into that spawn list).
+/// </summary>
 public class DroneTrioList
 {
     public List<DroneTrio> dl = new List<DroneTrio>();
@@ -17,6 +21,7 @@ public class DroneTrioList
 
         for (int i = 0; i < connections.Count; i++)
         {
+            // Bug: third test repeats x, so y < 1 is not rejected. Fixed on vff+orca.
             if(1 <= connections[i].x && connections[i].x <= dl.Count && 1 <= connections[i].x && connections[i].y <= dl.Count)
             ConnectTrios(dl[connections[i].x-1], dl[connections[i].y-1], connections[i].d);
         }

@@ -1,10 +1,11 @@
-// [INFO]
-// W przeliczeniu na rozmiar drona (jesli mialby byc 3,5") - jeden REALNY metr to 6 jednostek w Unity
+// Scale: 3.5" drone → ~6 Unity units = 1 real metre. Speeds/distances in this branch
+// use that convention. Wind fields below are unused (SyncPhysicsSettings is commented out).
 
 using UnityEngine;
 using System.Collections.Generic;
 using Unity.VisualScripting;
 
+/// <summary>1-based indices into <see cref="Simulation.spawnPositions"/>; <c>d</c> is mother↔mother rest length.</summary>
 [System.Serializable]
 public struct ConnectionData
 {
@@ -20,6 +21,10 @@ public struct SpawnPoint
     public float z;
 }
 
+/// <summary>
+/// Scene bootstrap on mission-i-moduly: spawn via <see cref="DroneTrioList"/>, inject
+/// <see cref="globalDroneSettings"/>, register mother cameras. Does not steer.
+/// </summary>
 [RequireComponent(typeof(CameraSwitcher))]
 public class Simulation : MonoBehaviour
 {

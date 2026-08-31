@@ -1,5 +1,9 @@
 using UnityEngine;
 
+/// <summary>
+/// Equilateral trio. Drone <c>a</c> is the mother (<see cref="DroneAI.isAnchor"/>).
+/// Children <c>b</c>/<c>c</c> are not linked to other trios.
+/// </summary>
 [System.Serializable]
 public class DroneTrio
 {
@@ -11,6 +15,7 @@ public class DroneTrio
         a.isAnchor = true;
 
         b = Create(prefab, offset + new Vector3(d, 0, 0));
+        // 0.87 ≈ √3/2. Later branches use 0.866 (sin 60°).
         c = Create(prefab, offset + new Vector3(d / 2f, 0, 0.87f * d));
 
         ConnectInside(a, b, d);

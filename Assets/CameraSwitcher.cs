@@ -2,6 +2,10 @@ using UnityEngine;
 using UnityEngine.InputSystem;
 using System.Collections.Generic;
 
+/// <summary>
+/// C cycles follow-cameras. Parallel <see cref="drones"/> list: only the current index
+/// is <see cref="DroneMover.isActive"/>. Filled with trio mothers by <see cref="Simulation"/>.
+/// </summary>
 public class CameraSwitcher : MonoBehaviour
 {
     public List<Camera> cameras = new List<Camera>();

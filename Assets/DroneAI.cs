@@ -1,38 +1,43 @@
 using UnityEngine;
 using System.Collections.Generic;
 
+/// <summary>
+/// Per-drone controller on mission-i-moduly: UWB publish, mission ghost, PD-to-ghost +
+/// Smith-style range PID. Mothers skip child edges; children and mother↔mother are regulated.
+/// Replaced by a thin orchestrator on vff+orca.
+/// </summary>
 public class DroneAI : MonoBehaviour
 {
     public List<Connection> connections = new List<Connection>();
     public bool isAnchor = false;
     public DroneSettings droneSettings;
 
-    // PID
     private struct PidState 
     {
         public float integral;
         public float lastError;
         public float lastVelocity;
 
-        // Smith Predictor
+        // Internal range model (Smith-style). On this branch, own motion is approximated
+        // by lastAppliedForce (spring step only) — FormationPid on vff+orca uses real displacement.
         public float internalModelDist;  
         public float driftCorrection;    
         public Vector3 lastAppliedForce; 
         public bool initialized;
 
-        // Estymacja prędkości sąsiada
-        public float neighborVelocity;   // Prędkość zbliżania/oddalania się celu
+        public float neighborVelocity;
         public float lastUwbDistance;
         public float lastUwbTimestamp;
     }
     private Dictionary<DroneAI, PidState> pidStorage = new Dictionary<DroneAI, PidState>();
 
-    // Zmienne pomocnicze misji
     private int currentTargetIndex = 0;
     private float timeInCurrentLeg = 0f;
     private Vector3 lastLegStartPosition;
+    // Ghost setpoint flown along Mission.targets. Springs chase this; CalculateMissionForce returns 0.
     private Vector3 estimatedPosition;
-    private Vector3 currentGyroDrift; // Skumulowany błąd kątowy
+    // Written every tick, never applied to pose/heading on this branch.
+    private Vector3 currentGyroDrift;
     private float uwbTimer = 0f;
 
     public UWBTransmission transmissionNode;
@@ -81,7 +86,6 @@ public class DroneAI : MonoBehaviour
             totalMovement = totalMovement.normalized * maxDistancePerFrame;
         }
 
-        // 5. Aplikujemy ruch
         transform.position += totalMovement;
 
         DrawConnections();
@@ -100,9 +104,8 @@ public class DroneAI : MonoBehaviour
             {
                 if (c.target == null) continue;
                 
-                // Realny dystans zaszumiony błędem pomiarowym (np. 2cm)
                 float realDist = Vector3.Distance(transform.position, c.target.transform.position);
-                float noisyDist = realDist + Random.Range(-0.1f, 0.1f); // Błąd 0.1 jednostki (ok. 1.6cm w Twojej skali)
+                float noisyDist = realDist + Random.Range(-0.1f, 0.1f); // ±0.1 u ≈ 1.6 cm at 6 u/m
 
                 transmissionNode.PushMeasurement(this, c.target, noisyDist);
             }
@@ -118,20 +121,14 @@ public class DroneAI : MonoBehaviour
         var currentTarget = droneSettings.mission.targets[currentTargetIndex];
         float duration = Mathf.Max(0.01f, currentTarget.timeStamp);
 
-        // 1. Wyliczamy o ile przesunąć wirtualną kotwicę w tej klatce
-        // Prędkość liniowa etapu
         Vector3 step = (currentTarget.target / duration) * Time.fixedDeltaTime;
 
-        // 2. Przesuwamy wirtualną kotwicę (Estimated Position)
-        // To jest nasz "duch", który leci idealnie wg planu
         estimatedPosition += step;
         
         timeInCurrentLeg += Time.fixedDeltaTime;
 
-        // 3. Sprawdzamy koniec etapu
         if (timeInCurrentLeg >= duration)
         {
-            // Snapujemy do ideału na koniec, żeby nie zbierać błędów float
             estimatedPosition = lastLegStartPosition + currentTarget.target;
             
             currentTargetIndex++;
@@ -139,8 +136,7 @@ public class DroneAI : MonoBehaviour
             lastLegStartPosition = estimatedPosition;
         }
 
-        // Zwracamy ZERO, bo teraz całą robotę wykona SpringForce, 
-        // który zobaczy, że estimatedPosition "uciekło" do przodu!
+        // Ghost moved; springs in CalculateSpringForce chase estimatedPosition.
         return Vector3.zero;
     }
 
@@ -149,13 +145,11 @@ public class DroneAI : MonoBehaviour
         Vector3 totalSpringForce = Vector3.zero;
         float dt = Time.fixedDeltaTime;
 
-        // --- 1. SIŁA OD WIRTUALNEJ KOTWICY (MISJA) ---
-        // To jest ta "gumka", która ciągnie drona za celem misji
         Vector3 missionError = estimatedPosition - transform.position;
         
-        // Używamy osobnych wzmocnień dla misji, żeby leciał "szybko, ale nie na full pizdę"
-        float missionP = 20f;  // Jak mocno gonić ducha
-        float missionD = 2f;  // Tłumienie, żeby nie przestrzelił
+        // Not on DroneSettings on this branch; vff+orca exposes missionP / missionD on the asset.
+        float missionP = 20f;
+        float missionD = 2f;
         
         Vector3 currentVel = totalMovement / dt;
         Vector3 missionSpring = (missionError * missionP) - (currentVel * missionD);
@@ -164,18 +158,15 @@ public class DroneAI : MonoBehaviour
         foreach (var c in connections)
         {
             if (c.target == null) continue;
+            // Inverse of main: mothers do not PID children; they do PID other mothers.
             if (isAnchor && !c.target.isAnchor) continue;
             if (!pidStorage.TryGetValue(c.target, out PidState state)) state = new PidState();
 
             Vector3 directionToTarget = (c.target.transform.position - transform.position).normalized;
 
-            // --- SMITH PREDICTOR Z ESTYMACJĄ PRĘDKOŚCI ---
-            
-            // 1. Aktualizacja modelu o NASZ ruch
             float myMovementTowardsTarget = Vector3.Dot(state.lastAppliedForce, directionToTarget);
             state.internalModelDist -= myMovementTowardsTarget;
 
-            // 2. Aktualizacja modelu o ruch SĄSIADA (przewidywany)
             state.internalModelDist += state.neighborVelocity * dt;
 
             // 3. Korekta modelu z UWB

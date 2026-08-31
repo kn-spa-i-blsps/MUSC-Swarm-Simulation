@@ -1,9 +1,13 @@
 using UnityEngine;
 using System.Collections.Generic;
 
+/// <summary>
+/// In-process UWB blackboard. Measurements are visible on the same physics tick they
+/// are pushed — there is no radio delay on this branch (that appears on vff+orca).
+/// Keys are unordered drone pairs (sorted instance IDs).
+/// </summary>
 public class UWBTransmission : MonoBehaviour
 {
-    // Struktura przechowująca dane o pojedynczym pomiarze między dwoma dronami
     public struct MeasurementData
     {
         public float distance;
