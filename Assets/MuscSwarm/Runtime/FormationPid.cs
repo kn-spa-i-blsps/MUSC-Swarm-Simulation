@@ -4,8 +4,8 @@ using UnityEngine;
 namespace MuscSwarm
 {
     /// <summary>
-    /// Regulator formacji oparty o PID na pomiarach dystansu UWB do sasiadow,
-    /// rozszerzony o Smith Predictor (model wewnetrzny dystansu kompensujacy lag UWB).
+    /// PID + Smith predictor on UWB ranges (PidSpring mode). Skips mother→child.
+    /// Uses last-frame real displacement, not lastAppliedForce (that bug is on mission-i-moduly).
     /// </summary>
     /// <remarks>
     /// Jedna instancja per dron. Trzyma slownik stanu per sasiad (PID + Smith).

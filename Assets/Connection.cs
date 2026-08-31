@@ -1,8 +1,8 @@
 using UnityEngine;
 
 /// <summary>
-/// Polaczenie miedzy dwoma dronami uzywane przez regulator PID.
-/// Zadana odleglosc bedzie utrzymywana przez Smith Predictor + PID.
+/// Directed formation edge used by <see cref="MuscSwarm.FormationPid"/> and
+/// <see cref="MuscSwarm.ConnectionSpring"/>. No PID state here (unlike branch main).
 /// </summary>
 [System.Serializable]
 public class Connection

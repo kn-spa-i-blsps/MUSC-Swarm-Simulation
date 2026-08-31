@@ -1,13 +1,13 @@
 using UnityEngine;
 
 /// <summary>
-/// Trzy drony w rownobocznym trojkacie. Dron <c>a</c> jest kotwica (anchor),
-/// trzymane sa wszystkie 3 pary polaczen na zadanym dystansie.
+/// Equilateral trio. Mother <c>a</c> (<see cref="DroneAI.isAnchor"/>) is the only drone
+/// wired to other trios. All three pairs get bidirectional rest-length edges.
 /// </summary>
 [System.Serializable]
 public class DroneTrio
 {
-    /// <summary>Kotwica trio - obsluguje polaczenia z innymi trio.</summary>
+    /// <summary>Trio mother — the only drone used for inter-trio connections.</summary>
     public DroneAI a;
     public DroneAI b;
     public DroneAI c;

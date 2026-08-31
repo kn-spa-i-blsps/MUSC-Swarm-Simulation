@@ -3,9 +3,8 @@ using MuscSwarm;
 using UnityEngine;
 
 /// <summary>
-/// Orchestrator pojedynczego drona: spina sterowanie (PID+Spring lub VFF+ORCA),
-/// sampler UWB, ducha misji i debug. Cala "ciezka" logika siedzi w klasach pomocniczych
-/// w namespace <see cref="MuscSwarm"/>.
+/// Per-drone orchestrator: chooses PidSpring vs VffOrca, ticks UWB + mission ghost,
+/// applies obstacle repulsion. Heavy math lives in <see cref="MuscSwarm"/>.
 /// </summary>
 [DisallowMultipleComponent]
 public class DroneAI : MonoBehaviour
